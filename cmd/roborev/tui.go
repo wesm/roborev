@@ -324,6 +324,42 @@ func (m tuiModel) renderJobLine(job storage.ReviewJob) string {
 		job.ID, sha, repo, agent, styledStatus, elapsed)
 }
 
+// wrapText wraps text to the specified width, preserving existing line breaks
+// and breaking at word boundaries when possible
+func wrapText(text string, width int) []string {
+	if width <= 0 {
+		width = 100
+	}
+
+	var result []string
+	for _, line := range strings.Split(text, "\n") {
+		if len(line) <= width {
+			result = append(result, line)
+			continue
+		}
+
+		// Wrap long lines
+		for len(line) > width {
+			// Find a good break point (space) near the width
+			breakPoint := width
+			for i := width; i > width/2; i-- {
+				if i < len(line) && line[i] == ' ' {
+					breakPoint = i
+					break
+				}
+			}
+
+			result = append(result, line[:breakPoint])
+			line = strings.TrimLeft(line[breakPoint:], " ")
+		}
+		if len(line) > 0 {
+			result = append(result, line)
+		}
+	}
+
+	return result
+}
+
 func (m tuiModel) renderReviewView() string {
 	var b strings.Builder
 
@@ -340,8 +376,10 @@ func (m tuiModel) renderReviewView() string {
 	}
 	b.WriteString("\n")
 
-	// Split output into lines and handle scrolling
-	lines := strings.Split(review.Output, "\n")
+	// Wrap text to terminal width (max 100 chars)
+	wrapWidth := min(m.width-2, 100)
+	lines := wrapText(review.Output, wrapWidth)
+
 	visibleLines := m.height - 5 // Leave room for title and help
 
 	start := m.reviewScroll
