@@ -326,6 +326,122 @@ func TestJobCounts(t *testing.T) {
 	_ = job
 }
 
+func TestRetryJob(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	repo, _ := db.GetOrCreateRepo("/tmp/test-repo")
+	commit, _ := db.GetOrCreateCommit(repo.ID, "retry123", "Author", "Subject", time.Now())
+	job, _ := db.EnqueueJob(repo.ID, commit.ID, "retry123", "codex")
+
+	// Claim the job (makes it running)
+	_, _ = db.ClaimJob("worker-1")
+
+	// Retry should succeed (retry_count: 0 -> 1)
+	retried, err := db.RetryJob(job.ID, 3)
+	if err != nil {
+		t.Fatalf("RetryJob failed: %v", err)
+	}
+	if !retried {
+		t.Error("First retry should succeed")
+	}
+
+	// Verify job is queued with retry_count=1
+	updatedJob, _ := db.GetJobByID(job.ID)
+	if updatedJob.Status != JobStatusQueued {
+		t.Errorf("Expected status 'queued', got '%s'", updatedJob.Status)
+	}
+	count, _ := db.GetJobRetryCount(job.ID)
+	if count != 1 {
+		t.Errorf("Expected retry_count=1, got %d", count)
+	}
+
+	// Claim again and retry twice more (retry_count: 1->2, 2->3)
+	_, _ = db.ClaimJob("worker-1")
+	db.RetryJob(job.ID, 3) // retry_count becomes 2
+	_, _ = db.ClaimJob("worker-1")
+	db.RetryJob(job.ID, 3) // retry_count becomes 3
+
+	count, _ = db.GetJobRetryCount(job.ID)
+	if count != 3 {
+		t.Errorf("Expected retry_count=3, got %d", count)
+	}
+
+	// Claim again - next retry should fail (at max)
+	_, _ = db.ClaimJob("worker-1")
+	retried, err = db.RetryJob(job.ID, 3)
+	if err != nil {
+		t.Fatalf("RetryJob at max failed: %v", err)
+	}
+	if retried {
+		t.Error("Retry should fail when at maxRetries")
+	}
+
+	// Job should still be running (retry didn't happen)
+	updatedJob, _ = db.GetJobByID(job.ID)
+	if updatedJob.Status != JobStatusRunning {
+		t.Errorf("Expected status 'running' after failed retry, got '%s'", updatedJob.Status)
+	}
+}
+
+func TestRetryJobOnlyWorksForRunning(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	repo, _ := db.GetOrCreateRepo("/tmp/test-repo")
+	commit, _ := db.GetOrCreateCommit(repo.ID, "retry-status", "Author", "Subject", time.Now())
+	job, _ := db.EnqueueJob(repo.ID, commit.ID, "retry-status", "codex")
+
+	// Try to retry a queued job (should fail - not running)
+	retried, err := db.RetryJob(job.ID, 3)
+	if err != nil {
+		t.Fatalf("RetryJob on queued job failed: %v", err)
+	}
+	if retried {
+		t.Error("RetryJob should not work on queued jobs")
+	}
+
+	// Claim, complete, then try retry (should fail - job is done)
+	_, _ = db.ClaimJob("worker-1")
+	db.CompleteJob(job.ID, "codex", "p", "o")
+
+	retried, err = db.RetryJob(job.ID, 3)
+	if err != nil {
+		t.Fatalf("RetryJob on done job failed: %v", err)
+	}
+	if retried {
+		t.Error("RetryJob should not work on completed jobs")
+	}
+}
+
+func TestRetryJobAtomic(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	repo, _ := db.GetOrCreateRepo("/tmp/test-repo")
+	commit, _ := db.GetOrCreateCommit(repo.ID, "retry-atomic", "Author", "Subject", time.Now())
+	job, _ := db.EnqueueJob(repo.ID, commit.ID, "retry-atomic", "codex")
+	_, _ = db.ClaimJob("worker-1")
+
+	// Simulate two concurrent retries - only first should succeed
+	// (In practice this tests the atomic update)
+	retried1, _ := db.RetryJob(job.ID, 3)
+	retried2, _ := db.RetryJob(job.ID, 3) // Job is now queued, not running
+
+	if !retried1 {
+		t.Error("First retry should succeed")
+	}
+	if retried2 {
+		t.Error("Second retry should fail (job is no longer running)")
+	}
+
+	// Verify retry_count is 1, not 2
+	count, _ := db.GetJobRetryCount(job.ID)
+	if count != 1 {
+		t.Errorf("Expected retry_count=1 (atomic), got %d", count)
+	}
+}
+
 func openTestDB(t *testing.T) *DB {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")

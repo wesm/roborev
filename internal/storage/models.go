@@ -41,6 +41,7 @@ type ReviewJob struct {
 	WorkerID   string     `json:"worker_id,omitempty"`
 	Error      string     `json:"error,omitempty"`
 	Prompt     string     `json:"prompt,omitempty"`
+	RetryCount int        `json:"retry_count"`
 
 	// Joined fields for convenience
 	RepoPath      string `json:"repo_path,omitempty"`

@@ -585,7 +585,11 @@ func (m tuiModel) renderJobLine(job storage.ReviewJob) string {
 	}
 
 	// Color the status, then pad to fixed width (lipgloss strips trailing spaces)
+	// Show retry count for queued/running jobs (e.g., "queued(1)")
 	status := string(job.Status)
+	if job.RetryCount > 0 && (job.Status == storage.JobStatusQueued || job.Status == storage.JobStatusRunning) {
+		status = fmt.Sprintf("%s(%d)", job.Status, job.RetryCount)
+	}
 	var styledStatus string
 	switch job.Status {
 	case storage.JobStatusQueued:

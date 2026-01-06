@@ -95,6 +95,8 @@ func (wp *WorkerPool) worker(id int) {
 	}
 }
 
+// maxRetries is the number of retry attempts allowed after initial failure.
+// With maxRetries=3, a job can run up to 4 times total (1 initial + 3 retries).
 const maxRetries = 3
 
 func (wp *WorkerPool) processJob(workerID string, job *storage.ReviewJob) {

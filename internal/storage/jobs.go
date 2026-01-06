@@ -165,30 +165,27 @@ func (db *DB) FailJob(jobID int64, errorMsg string) error {
 	return err
 }
 
-// RetryJob resets a failed job to queued for retry, returns false if max retries reached
+// RetryJob atomically resets a running job to queued for retry.
+// Returns false if max retries reached or job is not in running state.
+// maxRetries is the number of retries allowed (e.g., 3 means up to 4 total attempts).
 func (db *DB) RetryJob(jobID int64, maxRetries int) (bool, error) {
-	// Get current retry count
-	var retryCount int
-	err := db.QueryRow(`SELECT retry_count FROM review_jobs WHERE id = ?`, jobID).Scan(&retryCount)
-	if err != nil {
-		return false, err
-	}
-
-	if retryCount >= maxRetries {
-		return false, nil
-	}
-
-	// Reset to queued and increment retry count
-	_, err = db.Exec(`
+	// Atomically update only if retry_count < maxRetries and status is running
+	// This prevents race conditions with multiple workers
+	result, err := db.Exec(`
 		UPDATE review_jobs
 		SET status = 'queued', worker_id = NULL, started_at = NULL, finished_at = NULL, error = NULL, retry_count = retry_count + 1
-		WHERE id = ?
-	`, jobID)
+		WHERE id = ? AND retry_count < ? AND status = 'running'
+	`, jobID, maxRetries)
 	if err != nil {
 		return false, err
 	}
 
-	return true, nil
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return rows > 0, nil
 }
 
 // GetJobRetryCount returns the retry count for a job
@@ -202,7 +199,7 @@ func (db *DB) GetJobRetryCount(jobID int64) (int, error) {
 func (db *DB) ListJobs(statusFilter string, limit int) ([]ReviewJob, error) {
 	query := `
 		SELECT j.id, j.repo_id, j.commit_id, j.git_ref, j.agent, j.status, j.enqueued_at,
-		       j.started_at, j.finished_at, j.worker_id, j.error, j.prompt,
+		       j.started_at, j.finished_at, j.worker_id, j.error, j.prompt, j.retry_count,
 		       r.root_path, r.name, c.subject, rv.addressed
 		FROM review_jobs j
 		JOIN repos r ON r.id = j.repo_id
@@ -239,7 +236,7 @@ func (db *DB) ListJobs(statusFilter string, limit int) ([]ReviewJob, error) {
 		var addressed sql.NullInt64
 
 		err := rows.Scan(&j.ID, &j.RepoID, &commitID, &j.GitRef, &j.Agent, &j.Status, &enqueuedAt,
-			&startedAt, &finishedAt, &workerID, &errMsg, &prompt,
+			&startedAt, &finishedAt, &workerID, &errMsg, &prompt, &j.RetryCount,
 			&j.RepoPath, &j.RepoName, &commitSubject, &addressed)
 		if err != nil {
 			return nil, err
