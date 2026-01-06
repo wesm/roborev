@@ -449,6 +449,8 @@ func tuiCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if addr == "" {
 				addr = getDaemonAddr()
+			} else if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+				addr = "http://" + addr
 			}
 			p := tea.NewProgram(newTuiModel(addr), tea.WithAltScreen())
 			if _, err := p.Run(); err != nil {

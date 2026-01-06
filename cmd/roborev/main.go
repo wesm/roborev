@@ -206,7 +206,7 @@ roborev enqueue --sha HEAD 2>/dev/null &
 			fmt.Println("Commands:")
 			fmt.Println("  roborev status      - view queue and daemon status")
 			fmt.Println("  roborev show HEAD   - view review for a commit")
-			fmt.Println("  roborev-tui         - interactive terminal UI")
+			fmt.Println("  roborev tui         - interactive terminal UI")
 
 			return nil
 		},

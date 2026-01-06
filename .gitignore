@@ -1,7 +1,6 @@
 # Binaries (in root directory only)
 /roborev
 /roborevd
-/roborev-tui
 *.exe
 /dist/
 
