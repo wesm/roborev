@@ -40,7 +40,6 @@ This installs a post-commit hook. Every commit is now reviewed automatically.
 roborev status       # Show queue and daemon status
 roborev show         # Show review for HEAD
 roborev show abc123  # Show review for specific commit
-roborev respond HEAD # Add response to a review
 roborev address 42   # Mark review #42 as addressed
 roborev tui          # Interactive terminal UI
 ```
@@ -149,7 +148,6 @@ default_agent = "claude-code"
 | `roborev init` | Initialize in current repo |
 | `roborev status` | Show daemon and queue status |
 | `roborev show [sha]` | Display review |
-| `roborev respond <sha>` | Add response |
 | `roborev address <id>` | Mark review as addressed |
 | `roborev enqueue [commit]` | Enqueue a single commit for review |
 | `roborev enqueue <start> <end>` | Enqueue a commit range for review |
