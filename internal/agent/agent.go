@@ -90,7 +90,7 @@ func GetAvailable(preferred string) (Agent, error) {
 	}
 
 	if len(available) == 0 {
-		return nil, fmt.Errorf("no agents available (install codex or claude)")
+		return nil, fmt.Errorf("no agents available (install one of: codex, claude-code, gemini, copilot)")
 	}
 
 	return Get(available[0])
