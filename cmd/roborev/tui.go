@@ -499,7 +499,7 @@ func (m tuiModel) renderQueueView() string {
 		b.WriteString("No jobs in queue\n")
 	} else {
 		// Header (with 2-char prefix to align with row selector)
-		header := fmt.Sprintf("  %-4s %-17s %-15s %-8s %-8s %-12s %-8s %s",
+		header := fmt.Sprintf("  %-4s %-17s %-15s %-8s %-10s %-12s %-8s %s",
 			"ID", "Ref", "Repo", "Agent", "Status", "Queued", "Elapsed", "Addr'd")
 		b.WriteString(tuiStatusStyle.Render(header))
 		b.WriteString("\n")
@@ -604,7 +604,8 @@ func (m tuiModel) renderJobLine(job storage.ReviewJob) string {
 		styledStatus = status
 	}
 	// Pad after coloring since lipgloss strips trailing spaces
-	padding := 8 - len(status)
+	// Width 10 accommodates "running(3)" (10 chars)
+	padding := 10 - len(status)
 	if padding > 0 {
 		styledStatus += strings.Repeat(" ", padding)
 	}
