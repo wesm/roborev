@@ -59,7 +59,7 @@ The range is inclusive of both endpoints. This is useful for reviewing a feature
 Per-repository `.roborev.toml`:
 
 ```toml
-agent = "claude-code"    # codex, claude-code, gemini, or copilot
+agent = "claude-code"    # codex, claude-code, gemini, copilot, or opencode
 review_context_count = 5
 
 # Project-specific review guidelines (multi-line string)
@@ -115,13 +115,14 @@ roborev supports multiple AI review agents:
 | `claude-code` | Anthropic Claude Code | `npm install -g @anthropic-ai/claude-code` |
 | `gemini` | Google Gemini | `npm install -g @google/gemini-cli` |
 | `copilot` | GitHub Copilot | `npm install -g @github/copilot` |
+| `opencode` | OpenCode | `curl -fsSL https://opencode.ai/install \| bash` |
 
 ### Automatic Fallback
 
 roborev automatically detects which agents are installed. If your preferred agent isn't available, it falls back in this order:
 
 ```
-codex → claude-code → gemini → copilot
+codex → claude-code → gemini → copilot → opencode
 ```
 
 If none are installed, the job fails with a helpful error message.
@@ -151,7 +152,7 @@ roborev enqueue HEAD --agent copilot
 1. `--agent` flag on enqueue command
 2. Per-repo `.roborev.toml`
 3. Global `~/.roborev/config.toml`
-4. Automatic detection (first available: codex → claude-code → gemini → copilot)
+4. Automatic detection (first available: codex → claude-code → gemini → copilot → opencode)
 
 ## Commands
 
