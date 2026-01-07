@@ -55,6 +55,7 @@ type tuiModel struct {
 	jobs            []storage.ReviewJob
 	status          storage.DaemonStatus
 	selectedIdx     int
+	selectedJobID   int64 // Track selected job by ID to maintain position on refresh
 	currentView     tuiView
 	currentReview   *storage.Review
 	reviewScroll    int
@@ -270,6 +271,13 @@ func (m tuiModel) toggleAddressedForJob(jobID int64, currentState *bool) tea.Cmd
 	}
 }
 
+// updateSelectedJobID updates the tracked job ID after navigation
+func (m *tuiModel) updateSelectedJobID() {
+	if m.selectedIdx >= 0 && m.selectedIdx < len(m.jobs) {
+		m.selectedJobID = m.jobs[m.selectedIdx].ID
+	}
+}
+
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -299,6 +307,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.currentView == tuiViewQueue {
 				if m.selectedIdx > 0 {
 					m.selectedIdx--
+					m.updateSelectedJobID()
 				}
 			} else if m.currentView == tuiViewReview {
 				if m.reviewScroll > 0 {
@@ -314,6 +323,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.currentView == tuiViewQueue {
 				if m.selectedIdx < len(m.jobs)-1 {
 					m.selectedIdx++
+					m.updateSelectedJobID()
 				}
 			} else if m.currentView == tuiViewReview {
 				m.reviewScroll++
@@ -326,6 +336,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.currentView == tuiViewQueue {
 				if len(m.jobs) > 0 {
 					m.selectedIdx = max(0, m.selectedIdx-pageSize)
+					m.updateSelectedJobID()
 				}
 			} else if m.currentView == tuiViewReview {
 				m.reviewScroll = max(0, m.reviewScroll-pageSize)
@@ -338,6 +349,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.currentView == tuiViewQueue {
 				if len(m.jobs) > 0 {
 					m.selectedIdx = min(len(m.jobs)-1, m.selectedIdx+pageSize)
+					m.updateSelectedJobID()
 				}
 			} else if m.currentView == tuiViewReview {
 				m.reviewScroll += pageSize
@@ -436,12 +448,38 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.tick(), m.fetchJobs(), m.fetchStatus())
 
 	case tuiJobsMsg:
+		oldLen := len(m.jobs)
 		m.jobs = msg
-		// Normalize selectedIdx to valid range (handles empty list and out-of-bounds)
+
 		if len(m.jobs) == 0 {
 			m.selectedIdx = 0
+			m.selectedJobID = 0
+		} else if m.selectedJobID > 0 {
+			// Try to find the previously selected job by ID
+			newIdx := -1
+			for i, job := range m.jobs {
+				if job.ID == m.selectedJobID {
+					newIdx = i
+					break
+				}
+			}
+
+			// If too many new jobs added at once (20+), just keep current index
+			newJobs := len(m.jobs) - oldLen
+			if newIdx >= 0 && newJobs < 20 {
+				m.selectedIdx = newIdx
+			} else {
+				// Job not found or large batch - clamp to valid range
+				m.selectedIdx = max(0, min(len(m.jobs)-1, m.selectedIdx))
+			}
+			// Update selectedJobID to match current selection
+			m.selectedJobID = m.jobs[m.selectedIdx].ID
 		} else {
+			// No job was selected yet, just clamp
 			m.selectedIdx = max(0, min(len(m.jobs)-1, m.selectedIdx))
+			if len(m.jobs) > 0 {
+				m.selectedJobID = m.jobs[m.selectedIdx].ID
+			}
 		}
 
 	case tuiStatusMsg:
