@@ -200,3 +200,103 @@ func TestTUIHTTPTimeout(t *testing.T) {
 		t.Fatalf("Expected tuiErrMsg for timeout, got %T: %v", msg, msg)
 	}
 }
+
+func TestTUISelectionMaintainedOnInsert(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Initial state with 3 jobs, select the middle one (ID=2)
+	m.jobs = []storage.ReviewJob{
+		{ID: 3}, {ID: 2}, {ID: 1},
+	}
+	m.selectedIdx = 1
+	m.selectedJobID = 2
+
+	// New jobs added at the top (newer jobs first)
+	newJobs := tuiJobsMsg([]storage.ReviewJob{
+		{ID: 5}, {ID: 4}, {ID: 3}, {ID: 2}, {ID: 1},
+	})
+
+	updated, _ := m.Update(newJobs)
+	m = updated.(tuiModel)
+
+	// Should still be on job ID=2, now at index 3
+	if m.selectedJobID != 2 {
+		t.Errorf("Expected selectedJobID=2, got %d", m.selectedJobID)
+	}
+	if m.selectedIdx != 3 {
+		t.Errorf("Expected selectedIdx=3 (ID=2 moved), got %d", m.selectedIdx)
+	}
+}
+
+func TestTUISelectionClampsOnRemoval(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Initial state with 3 jobs, select the last one (ID=1)
+	m.jobs = []storage.ReviewJob{
+		{ID: 3}, {ID: 2}, {ID: 1},
+	}
+	m.selectedIdx = 2
+	m.selectedJobID = 1
+
+	// Job ID=1 is removed
+	newJobs := tuiJobsMsg([]storage.ReviewJob{
+		{ID: 3}, {ID: 2},
+	})
+
+	updated, _ := m.Update(newJobs)
+	m = updated.(tuiModel)
+
+	// Should clamp to last valid index and update selectedJobID
+	if m.selectedIdx != 1 {
+		t.Errorf("Expected selectedIdx=1 (clamped), got %d", m.selectedIdx)
+	}
+	if m.selectedJobID != 2 {
+		t.Errorf("Expected selectedJobID=2 (new selection), got %d", m.selectedJobID)
+	}
+}
+
+func TestTUISelectionFirstJobOnEmpty(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// No prior selection (empty jobs list, zero selectedJobID)
+	m.jobs = []storage.ReviewJob{}
+	m.selectedIdx = 0
+	m.selectedJobID = 0
+
+	// Jobs arrive
+	newJobs := tuiJobsMsg([]storage.ReviewJob{
+		{ID: 5}, {ID: 4}, {ID: 3},
+	})
+
+	updated, _ := m.Update(newJobs)
+	m = updated.(tuiModel)
+
+	// Should select first job
+	if m.selectedIdx != 0 {
+		t.Errorf("Expected selectedIdx=0, got %d", m.selectedIdx)
+	}
+	if m.selectedJobID != 5 {
+		t.Errorf("Expected selectedJobID=5 (first job), got %d", m.selectedJobID)
+	}
+}
+
+func TestTUISelectionEmptyList(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Had jobs, now empty
+	m.jobs = []storage.ReviewJob{{ID: 1}}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+
+	newJobs := tuiJobsMsg([]storage.ReviewJob{})
+
+	updated, _ := m.Update(newJobs)
+	m = updated.(tuiModel)
+
+	if m.selectedIdx != 0 {
+		t.Errorf("Expected selectedIdx=0, got %d", m.selectedIdx)
+	}
+	if m.selectedJobID != 0 {
+		t.Errorf("Expected selectedJobID=0, got %d", m.selectedJobID)
+	}
+}
