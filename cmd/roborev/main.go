@@ -32,7 +32,7 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "roborev",
 		Short: "Automatic code review for git commits",
-		Long:  "RoboRev automatically reviews git commits using AI agents (Codex, Claude Code, Gemini, Copilot)",
+		Long:  "RoboRev automatically reviews git commits using AI agents (Codex, Claude Code, Gemini, Copilot, OpenCode)",
 	}
 
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "http://127.0.0.1:7373", "daemon server address")
@@ -295,7 +295,7 @@ roborev enqueue --sha HEAD 2>/dev/null &
 		},
 	}
 
-	cmd.Flags().StringVar(&agent, "agent", "", "default agent (codex, claude-code, gemini, copilot)")
+	cmd.Flags().StringVar(&agent, "agent", "", "default agent (codex, claude-code, gemini, copilot, opencode)")
 
 	return cmd
 }
@@ -418,7 +418,7 @@ Examples:
 
 	cmd.Flags().StringVar(&repoPath, "repo", "", "path to git repository (default: current directory)")
 	cmd.Flags().StringVar(&sha, "sha", "HEAD", "commit SHA to review (used when no positional args)")
-	cmd.Flags().StringVar(&agent, "agent", "", "agent to use (codex, claude-code, gemini, copilot)")
+	cmd.Flags().StringVar(&agent, "agent", "", "agent to use (codex, claude-code, gemini, copilot, opencode)")
 
 	return cmd
 }
