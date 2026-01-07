@@ -6,7 +6,7 @@ import (
 
 func TestAgentRegistry(t *testing.T) {
 	// Check that all agents are registered
-	agents := []string{"codex", "claude-code", "gemini", "copilot", "test"}
+	agents := []string{"codex", "claude-code", "gemini", "copilot", "opencode", "test"}
 	for _, name := range agents {
 		a, err := Get(name)
 		if err != nil {
@@ -26,9 +26,9 @@ func TestAgentRegistry(t *testing.T) {
 
 func TestAvailableAgents(t *testing.T) {
 	agents := Available()
-	// We have 5 agents: codex, claude-code, gemini, copilot, test
-	if len(agents) < 5 {
-		t.Errorf("Expected at least 5 agents, got %d: %v", len(agents), agents)
+	// We have 6 agents: codex, claude-code, gemini, copilot, opencode, test
+	if len(agents) < 6 {
+		t.Errorf("Expected at least 6 agents, got %d: %v", len(agents), agents)
 	}
 
 	expected := map[string]bool{
@@ -36,6 +36,7 @@ func TestAvailableAgents(t *testing.T) {
 		"claude-code": false,
 		"gemini":      false,
 		"copilot":     false,
+		"opencode":    false,
 		"test":        false,
 	}
 
