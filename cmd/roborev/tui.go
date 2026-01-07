@@ -72,6 +72,11 @@ type tuiStatusMsg storage.DaemonStatus
 type tuiReviewMsg *storage.Review
 type tuiPromptMsg *storage.Review
 type tuiAddressedMsg bool
+type tuiAddressedResultMsg struct {
+	jobID    int64
+	oldState bool
+	err      error
+}
 type tuiErrMsg error
 
 func newTuiModel(serverAddr string) tuiModel {
@@ -222,25 +227,27 @@ func (m tuiModel) addressReview(reviewID int64, addressed bool) tea.Cmd {
 
 // addressReviewInBackground fetches the review ID and updates addressed status.
 // Used for optimistic updates from queue view - UI already updated, this syncs to server.
+// On error, returns tuiAddressedResultMsg with oldState for rollback.
 func (m tuiModel) addressReviewInBackground(jobID int64, newState bool) tea.Cmd {
+	oldState := !newState // The state before optimistic update
 	return func() tea.Msg {
 		// Fetch the review to get its ID
 		resp, err := m.client.Get(fmt.Sprintf("%s/api/review?job_id=%d", m.serverAddr, jobID))
 		if err != nil {
-			return tuiErrMsg(err)
+			return tuiAddressedResultMsg{jobID: jobID, oldState: oldState, err: err}
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode == http.StatusNotFound {
-			return tuiErrMsg(fmt.Errorf("no review for this job"))
+			return tuiAddressedResultMsg{jobID: jobID, oldState: oldState, err: fmt.Errorf("no review for this job")}
 		}
 		if resp.StatusCode != http.StatusOK {
-			return tuiErrMsg(fmt.Errorf("fetch review: %s", resp.Status))
+			return tuiAddressedResultMsg{jobID: jobID, oldState: oldState, err: fmt.Errorf("fetch review: %s", resp.Status)}
 		}
 
 		var review storage.Review
 		if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
-			return tuiErrMsg(err)
+			return tuiAddressedResultMsg{jobID: jobID, oldState: oldState, err: err}
 		}
 
 		// Now mark it
@@ -249,19 +256,19 @@ func (m tuiModel) addressReviewInBackground(jobID int64, newState bool) tea.Cmd 
 			"addressed": newState,
 		})
 		if err != nil {
-			return tuiErrMsg(err)
+			return tuiAddressedResultMsg{jobID: jobID, oldState: oldState, err: err}
 		}
 		resp2, err := m.client.Post(m.serverAddr+"/api/review/address", "application/json", bytes.NewReader(reqBody))
 		if err != nil {
-			return tuiErrMsg(err)
+			return tuiAddressedResultMsg{jobID: jobID, oldState: oldState, err: err}
 		}
 		defer resp2.Body.Close()
 
 		if resp2.StatusCode != http.StatusOK {
-			return tuiErrMsg(fmt.Errorf("mark review: %s", resp2.Status))
+			return tuiAddressedResultMsg{jobID: jobID, oldState: oldState, err: fmt.Errorf("mark review: %s", resp2.Status)}
 		}
-		// Success - UI already updated optimistically, nothing more to do
-		return nil
+		// Success
+		return tuiAddressedResultMsg{jobID: jobID, oldState: oldState, err: nil}
 	}
 }
 
@@ -539,6 +546,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiAddressedMsg:
 		if m.currentReview != nil {
 			m.currentReview.Addressed = bool(msg)
+		}
+
+	case tuiAddressedResultMsg:
+		if msg.err != nil {
+			// Rollback optimistic update on error
+			for i := range m.jobs {
+				if m.jobs[i].ID == msg.jobID && m.jobs[i].Addressed != nil {
+					*m.jobs[i].Addressed = msg.oldState
+					break
+				}
+			}
+			m.err = msg.err
 		}
 
 	case tuiErrMsg:
