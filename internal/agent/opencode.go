@@ -29,21 +29,30 @@ func (a *OpenCodeAgent) CommandName() string {
 }
 
 func (a *OpenCodeAgent) Review(ctx context.Context, repoPath, commitSHA, prompt string) (string, error) {
-	// Use opencode with -p for non-interactive mode, -c for working directory, -q for quiet mode
-	args := []string{
-		"-c", repoPath,
-		"-p", prompt,
-		"-q",
-	}
+	// OpenCode CLI supports a headless invocation via `opencode run [message..]`.
+	// We run it from the repo root so it can use project context, and pass the full
+	// roborev prompt as the message.
+	//
+	// Helpful reference:
+	//   opencode --help
+	//   opencode run --help
+	args := []string{"run", "--format", "default", prompt}
 
 	cmd := exec.CommandContext(ctx, a.Command, args...)
+	cmd.Dir = repoPath
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("opencode failed: %w\nstderr: %s", err, stderr.String())
+		// opencode sometimes prints failures/usage to stdout; include both streams.
+		return "", fmt.Errorf(
+			"opencode failed: %w\nstdout: %s\nstderr: %s",
+			err,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 
 	output := stdout.String()
