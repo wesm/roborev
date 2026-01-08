@@ -746,9 +746,9 @@ func uninstallHookCmd() *cobra.Command {
 				return fmt.Errorf("read hook: %w", err)
 			}
 
-			// Check if it contains roborev
+			// Check if it contains roborev (case-insensitive)
 			hookStr := string(content)
-			if !strings.Contains(hookStr, "roborev") {
+			if !strings.Contains(strings.ToLower(hookStr), "roborev") {
 				fmt.Println("Post-commit hook does not contain roborev")
 				return nil
 			}
@@ -757,8 +757,8 @@ func uninstallHookCmd() *cobra.Command {
 			lines := strings.Split(hookStr, "\n")
 			var newLines []string
 			for _, line := range lines {
-				// Skip roborev-related lines
-				if strings.Contains(line, "roborev") || strings.Contains(line, "RoboRev") {
+				// Skip roborev-related lines (case-insensitive)
+				if strings.Contains(strings.ToLower(line), "roborev") {
 					continue
 				}
 				newLines = append(newLines, line)

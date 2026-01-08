@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/wesm/roborev/internal/daemon"
@@ -159,6 +160,149 @@ func TestEnqueueCmdPositionalArg(t *testing.T) {
 		// When no arg provided, CLI sends "HEAD" which gets resolved server-side
 		if receivedSHA != "HEAD" {
 			t.Errorf("Expected HEAD, got %s", receivedSHA)
+		}
+	})
+}
+
+func TestUninstallHookCmd(t *testing.T) {
+	// Helper to create a git repo with an optional hook
+	setupRepo := func(t *testing.T, hookContent string) (repoPath string, hookPath string) {
+		tmpDir := t.TempDir()
+
+		// Initialize git repo
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git init failed: %v\n%s", err, out)
+		}
+
+		hookPath = filepath.Join(tmpDir, ".git", "hooks", "post-commit")
+
+		if hookContent != "" {
+			if err := os.MkdirAll(filepath.Dir(hookPath), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(hookPath, []byte(hookContent), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		return tmpDir, hookPath
+	}
+
+	t.Run("hook missing", func(t *testing.T) {
+		repoPath, hookPath := setupRepo(t, "")
+
+		// Change to repo dir for the command
+		origDir, _ := os.Getwd()
+		os.Chdir(repoPath)
+		defer os.Chdir(origDir)
+
+		cmd := uninstallHookCmd()
+		err := cmd.Execute()
+		if err != nil {
+			t.Fatalf("uninstall-hook failed: %v", err)
+		}
+
+		// Hook should still not exist
+		if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+			t.Error("Hook file should not exist")
+		}
+	})
+
+	t.Run("hook without roborev", func(t *testing.T) {
+		hookContent := "#!/bin/bash\necho 'other hook'\n"
+		repoPath, hookPath := setupRepo(t, hookContent)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(repoPath)
+		defer os.Chdir(origDir)
+
+		cmd := uninstallHookCmd()
+		err := cmd.Execute()
+		if err != nil {
+			t.Fatalf("uninstall-hook failed: %v", err)
+		}
+
+		// Hook should be unchanged
+		content, err := os.ReadFile(hookPath)
+		if err != nil {
+			t.Fatalf("Failed to read hook: %v", err)
+		}
+		if string(content) != hookContent {
+			t.Errorf("Hook content changed: got %q, want %q", string(content), hookContent)
+		}
+	})
+
+	t.Run("hook with roborev only - removes file", func(t *testing.T) {
+		hookContent := "#!/bin/bash\n# RoboRev auto-commit hook\nroborev enqueue\n"
+		repoPath, hookPath := setupRepo(t, hookContent)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(repoPath)
+		defer os.Chdir(origDir)
+
+		cmd := uninstallHookCmd()
+		err := cmd.Execute()
+		if err != nil {
+			t.Fatalf("uninstall-hook failed: %v", err)
+		}
+
+		// Hook should be removed entirely
+		if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+			t.Error("Hook file should have been removed")
+		}
+	})
+
+	t.Run("hook with roborev and other commands - preserves others", func(t *testing.T) {
+		hookContent := "#!/bin/bash\necho 'before'\nroborev enqueue\necho 'after'\n"
+		repoPath, hookPath := setupRepo(t, hookContent)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(repoPath)
+		defer os.Chdir(origDir)
+
+		cmd := uninstallHookCmd()
+		err := cmd.Execute()
+		if err != nil {
+			t.Fatalf("uninstall-hook failed: %v", err)
+		}
+
+		// Hook should exist with roborev line removed
+		content, err := os.ReadFile(hookPath)
+		if err != nil {
+			t.Fatalf("Failed to read hook: %v", err)
+		}
+
+		contentStr := string(content)
+		if strings.Contains(strings.ToLower(contentStr), "roborev") {
+			t.Error("Hook should not contain roborev")
+		}
+		if !strings.Contains(contentStr, "echo 'before'") {
+			t.Error("Hook should still contain 'echo before'")
+		}
+		if !strings.Contains(contentStr, "echo 'after'") {
+			t.Error("Hook should still contain 'echo after'")
+		}
+	})
+
+	t.Run("hook with capitalized RoboRev", func(t *testing.T) {
+		hookContent := "#!/bin/bash\n# RoboRev hook\nRoboRev enqueue\n"
+		repoPath, hookPath := setupRepo(t, hookContent)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(repoPath)
+		defer os.Chdir(origDir)
+
+		cmd := uninstallHookCmd()
+		err := cmd.Execute()
+		if err != nil {
+			t.Fatalf("uninstall-hook failed: %v", err)
+		}
+
+		// Hook should be removed (only had RoboRev content)
+		if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+			t.Error("Hook file should have been removed")
 		}
 	})
 }
