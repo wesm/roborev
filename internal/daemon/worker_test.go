@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"fmt"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -472,4 +474,131 @@ func TestWorkerPoolCancelJobRegisteredDuringCheck(t *testing.T) {
 		t.Error("Registered job should not be in pendingCancels")
 	}
 	pool.runningJobsMu.Unlock()
+}
+
+func TestWorkerPoolCancelJobConcurrentRegister(t *testing.T) {
+	// Test concurrent registration during CancelJob
+	// This exercises the race condition where a job registers during DB lookup
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open test DB: %v", err)
+	}
+	defer db.Close()
+
+	cfg := config.DefaultConfig()
+	pool := NewWorkerPool(db, cfg, 1)
+
+	repo, err := db.GetOrCreateRepo(tmpDir)
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+
+	// Run multiple iterations to increase chance of hitting race
+	for i := 0; i < 10; i++ {
+		sha := fmt.Sprintf("concurrent-race-%d", i)
+		commit, err := db.GetOrCreateCommit(repo.ID, sha, "Author", "Subject", time.Now())
+		if err != nil {
+			t.Fatalf("GetOrCreateCommit failed: %v", err)
+		}
+		job, err := db.EnqueueJob(repo.ID, commit.ID, sha, "test")
+		if err != nil {
+			t.Fatalf("EnqueueJob failed: %v", err)
+		}
+		_, err = db.ClaimJob("test-worker")
+		if err != nil {
+			t.Fatalf("ClaimJob failed: %v", err)
+		}
+
+		var canceled int32
+		cancelFunc := func() { atomic.AddInt32(&canceled, 1) }
+
+		// Start CancelJob in goroutine
+		cancelDone := make(chan bool)
+		go func() {
+			cancelDone <- pool.CancelJob(job.ID)
+		}()
+
+		// Concurrently register the job (simulates worker starting)
+		pool.registerRunningJob(job.ID, cancelFunc)
+
+		// Wait for CancelJob to complete
+		result := <-cancelDone
+
+		// Job should have been canceled (either via runningJobs or pendingCancels)
+		if !result {
+			t.Errorf("Iteration %d: CancelJob should return true", i)
+		}
+		if atomic.LoadInt32(&canceled) == 0 {
+			t.Errorf("Iteration %d: Job should have been canceled", i)
+		}
+
+		// Clean up for next iteration
+		pool.unregisterRunningJob(job.ID)
+	}
+}
+
+func TestWorkerPoolCancelJobFinalCheckDeadlockSafe(t *testing.T) {
+	// Test that cancel() is called without holding the lock (no deadlock)
+	// This verifies the fix for the "final check" path
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open test DB: %v", err)
+	}
+	defer db.Close()
+
+	cfg := config.DefaultConfig()
+	pool := NewWorkerPool(db, cfg, 1)
+
+	repo, err := db.GetOrCreateRepo(tmpDir)
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+	commit, err := db.GetOrCreateCommit(repo.ID, "deadlock-test", "Author", "Subject", time.Now())
+	if err != nil {
+		t.Fatalf("GetOrCreateCommit failed: %v", err)
+	}
+	job, err := db.EnqueueJob(repo.ID, commit.ID, "deadlock-test", "test")
+	if err != nil {
+		t.Fatalf("EnqueueJob failed: %v", err)
+	}
+	_, err = db.ClaimJob("test-worker")
+	if err != nil {
+		t.Fatalf("ClaimJob failed: %v", err)
+	}
+
+	// Create a cancel function that tries to call unregisterRunningJob
+	// If cancel() is called while holding the lock, this would deadlock
+	canceled := false
+	cancelFunc := func() {
+		canceled = true
+		// This would deadlock if cancel() was called while holding runningJobsMu
+		pool.unregisterRunningJob(job.ID)
+	}
+
+	// Register the job
+	pool.registerRunningJob(job.ID, cancelFunc)
+
+	// CancelJob should complete without deadlock
+	done := make(chan bool)
+	go func() {
+		pool.CancelJob(job.ID)
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// Success - no deadlock
+	case <-time.After(2 * time.Second):
+		t.Fatal("CancelJob deadlocked - cancel() called while holding lock")
+	}
+
+	if !canceled {
+		t.Error("Job should have been canceled")
+	}
 }

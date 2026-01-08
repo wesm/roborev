@@ -127,10 +127,10 @@ func (wp *WorkerPool) CancelJob(jobID int64) bool {
 
 	// Final lock acquisition to set pendingCancels
 	wp.runningJobsMu.Lock()
-	defer wp.runningJobsMu.Unlock()
 
 	// Final check if job registered while we did the second DB lookup
 	if cancel, ok := wp.runningJobs[jobID]; ok {
+		wp.runningJobsMu.Unlock()
 		log.Printf("Canceling job %d (registered during second DB check)", jobID)
 		cancel()
 		return true
@@ -138,6 +138,7 @@ func (wp *WorkerPool) CancelJob(jobID int64) bool {
 
 	// Mark for pending cancellation
 	wp.pendingCancels[jobID] = true
+	wp.runningJobsMu.Unlock()
 	log.Printf("Job %d not yet registered, marking for pending cancellation", jobID)
 	return true
 }
