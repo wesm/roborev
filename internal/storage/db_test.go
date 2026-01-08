@@ -679,9 +679,11 @@ func TestMigrationFromOldSchema(t *testing.T) {
 		t.Error("Expected constraint violation for invalid status")
 	}
 
-	// Verify foreign keys are enabled after migration by attempting an FK-violating insert
-	// This catches the connection-scoped PRAGMA issue where FKs might be left disabled
-	// Use a dedicated connection to ensure PRAGMA and INSERT use the same connection
+	// Verify FK enforcement works after migration
+	// Note: SQLite FKs are OFF by default per-connection, so we can't test that the migration
+	// "left FKs enabled" in the pool. What we CAN verify is:
+	// 1. The migration succeeded (which includes the FK check at the end)
+	// 2. FK enforcement works when enabled on a connection
 	ctx := context.Background()
 	conn, err := db.Conn(ctx)
 	if err != nil {
@@ -689,14 +691,21 @@ func TestMigrationFromOldSchema(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Enable FK enforcement on this connection
+	// Check FK pragma value on this connection before we modify it
+	// This is informational - FKs are OFF by default in SQLite
+	var fkEnabled int
+	if err := conn.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&fkEnabled); err != nil {
+		t.Fatalf("Failed to check foreign_keys pragma: %v", err)
+	}
+	t.Logf("foreign_keys pragma on pooled connection: %d", fkEnabled)
+
+	// Enable FK enforcement and verify it works (proves schema is correct for FKs)
 	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
 		t.Fatalf("Failed to enable foreign keys: %v", err)
 	}
-	// Now attempt an FK-violating insert on the same connection
 	_, err = conn.ExecContext(ctx, `INSERT INTO reviews (job_id, agent, prompt, output) VALUES (99999, 'test', 'p', 'o')`)
 	if err == nil {
-		t.Error("Expected foreign key violation for invalid job_id - FKs may not be enabled")
+		t.Error("Expected foreign key violation for invalid job_id - FKs may not be working")
 	}
 }
 
