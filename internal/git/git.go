@@ -230,7 +230,7 @@ func GetHooksPath(repoPath string) (string, error) {
 	hooksPath := strings.TrimSpace(string(out))
 
 	// If the path is relative, make it absolute relative to repoPath
-	if !strings.HasPrefix(hooksPath, "/") {
+	if !filepath.IsAbs(hooksPath) {
 		hooksPath = filepath.Join(repoPath, hooksPath)
 	}
 
