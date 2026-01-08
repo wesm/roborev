@@ -90,18 +90,28 @@ func CheckForUpdate(forceCheck bool) (*UpdateInfo, error) {
 	// Find the right asset for this platform
 	assetName := fmt.Sprintf("roborev_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
 	var asset *Asset
+	var checksumsAsset *Asset
 	for _, a := range release.Assets {
 		if a.Name == assetName {
 			asset = &a
-			break
+		}
+		if a.Name == "SHA256SUMS" || a.Name == "checksums.txt" {
+			checksumsAsset = &a
 		}
 	}
 	if asset == nil {
 		return nil, fmt.Errorf("no release asset found for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
-	// Try to extract checksum from release body
-	checksum := extractChecksum(release.Body, assetName)
+	// Get checksum - first try checksums file, then release body
+	var checksum string
+	if checksumsAsset != nil {
+		checksum, _ = fetchChecksumFromFile(checksumsAsset.BrowserDownloadURL, assetName)
+	}
+	if checksum == "" {
+		// Fall back to release body
+		checksum = extractChecksum(release.Body, assetName)
+	}
 
 	return &UpdateInfo{
 		CurrentVersion: version.Version,
@@ -115,6 +125,11 @@ func CheckForUpdate(forceCheck bool) (*UpdateInfo, error) {
 
 // PerformUpdate downloads and installs the update
 func PerformUpdate(info *UpdateInfo, progressFn func(downloaded, total int64)) error {
+	// Security: require checksum verification
+	if info.Checksum == "" {
+		return fmt.Errorf("no checksum available for %s - refusing to install unverified binary", info.AssetName)
+	}
+
 	// 1. Download to temp file
 	fmt.Printf("Downloading %s...\n", info.AssetName)
 	tempDir, err := os.MkdirTemp("", "roborev-update-*")
@@ -129,15 +144,13 @@ func PerformUpdate(info *UpdateInfo, progressFn func(downloaded, total int64)) e
 		return fmt.Errorf("download: %w", err)
 	}
 
-	// 2. Verify checksum if available
-	if info.Checksum != "" {
-		fmt.Printf("Verifying checksum... ")
-		if checksum != info.Checksum {
-			fmt.Println("FAILED")
-			return fmt.Errorf("checksum mismatch: expected %s, got %s", info.Checksum, checksum)
-		}
-		fmt.Println("OK")
+	// 2. Verify checksum (required)
+	fmt.Printf("Verifying checksum... ")
+	if !strings.EqualFold(checksum, info.Checksum) {
+		fmt.Println("FAILED")
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", info.Checksum, checksum)
 	}
+	fmt.Println("OK")
 
 	// 3. Extract archive
 	fmt.Println("Extracting...")
@@ -166,7 +179,7 @@ func PerformUpdate(info *UpdateInfo, progressFn func(downloaded, total int64)) e
 	for _, binary := range binaries {
 		srcPath := filepath.Join(extractDir, binary)
 		dstPath := filepath.Join(binDir, binary)
-		backupPath := dstPath + ".backup"
+		backupPath := dstPath + ".old"
 
 		// Check if source exists
 		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
@@ -175,9 +188,16 @@ func PerformUpdate(info *UpdateInfo, progressFn func(downloaded, total int64)) e
 
 		fmt.Printf("Installing %s... ", binary)
 
+		// Clean up any old backup from previous update
+		os.Remove(backupPath)
+
 		// Backup existing
 		if _, err := os.Stat(dstPath); err == nil {
 			if err := os.Rename(dstPath, backupPath); err != nil {
+				// On Windows, renaming a running executable may fail
+				if runtime.GOOS == "windows" {
+					return fmt.Errorf("cannot update %s while it is running - please stop the daemon and try again: %w", binary, err)
+				}
 				return fmt.Errorf("backup %s: %w", binary, err)
 			}
 		}
@@ -189,12 +209,15 @@ func PerformUpdate(info *UpdateInfo, progressFn func(downloaded, total int64)) e
 			return fmt.Errorf("install %s: %w", binary, err)
 		}
 
-		// Set executable permission
-		if err := os.Chmod(dstPath, 0755); err != nil {
-			return fmt.Errorf("chmod %s: %w", binary, err)
+		// Set executable permission (no-op on Windows)
+		if runtime.GOOS != "windows" {
+			if err := os.Chmod(dstPath, 0755); err != nil {
+				return fmt.Errorf("chmod %s: %w", binary, err)
+			}
 		}
 
-		// Remove backup
+		// Try to remove backup (may fail on Windows if daemon was running)
+		// The .old file will be cleaned up on next update
 		os.Remove(backupPath)
 
 		fmt.Println("OK")
@@ -297,6 +320,12 @@ func extractTarGz(archivePath, destDir string) error {
 		return err
 	}
 
+	// Get absolute path of destDir for security checks
+	absDestDir, err := filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("resolve dest dir: %w", err)
+	}
+
 	file, err := os.Open(archivePath)
 	if err != nil {
 		return err
@@ -319,7 +348,16 @@ func extractTarGz(archivePath, destDir string) error {
 			return err
 		}
 
-		target := filepath.Join(destDir, header.Name)
+		// Security: sanitize and validate the path
+		target, err := sanitizeTarPath(absDestDir, header.Name)
+		if err != nil {
+			return fmt.Errorf("invalid tar entry %q: %w", header.Name, err)
+		}
+
+		// Security: skip symlinks and hardlinks to prevent attacks
+		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
+			continue
+		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
@@ -349,6 +387,37 @@ func extractTarGz(archivePath, destDir string) error {
 	return nil
 }
 
+// sanitizeTarPath validates and sanitizes a tar entry path to prevent directory traversal
+func sanitizeTarPath(destDir, name string) (string, error) {
+	// Clean the path to remove . and .. components
+	cleanName := filepath.Clean(name)
+
+	// Reject absolute paths
+	if filepath.IsAbs(cleanName) {
+		return "", fmt.Errorf("absolute path not allowed")
+	}
+
+	// Reject paths that try to escape with ..
+	if strings.HasPrefix(cleanName, "..") || strings.Contains(cleanName, string(filepath.Separator)+"..") {
+		return "", fmt.Errorf("path traversal not allowed")
+	}
+
+	// Build the target path
+	target := filepath.Join(destDir, cleanName)
+
+	// Final check: ensure the target is within destDir
+	// This catches any edge cases the above checks might miss
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(absTarget, destDir+string(filepath.Separator)) && absTarget != destDir {
+		return "", fmt.Errorf("path escapes destination directory")
+	}
+
+	return target, nil
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -369,17 +438,38 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
+// fetchChecksumFromFile downloads a checksums file and extracts the checksum for assetName
+func fetchChecksumFromFile(url, assetName string) (string, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch checksums: %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return extractChecksum(string(body), assetName), nil
+}
+
 func extractChecksum(releaseBody, assetName string) string {
-	// Look for checksum in release notes
-	// Format: "assetname: checksum" or "checksum  assetname"
+	// Look for checksum in release notes or checksums file
+	// Format: "checksum  assetname" (standard sha256sum output) or "assetname: checksum"
 	lines := strings.Split(releaseBody, "\n")
+	// Case-insensitive regex for SHA256 hex (64 chars)
+	re := regexp.MustCompile(`(?i)[a-f0-9]{64}`)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, assetName) {
-			// Try "filename: checksum" format
-			re := regexp.MustCompile(`[a-f0-9]{64}`)
 			if match := re.FindString(line); match != "" {
-				return match
+				return strings.ToLower(match) // Normalize to lowercase
 			}
 		}
 	}

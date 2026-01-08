@@ -879,9 +879,14 @@ Requires confirmation before making changes (use --yes to skip).`,
 			// Restart daemon if running
 			if daemonInfo, err := daemon.ReadRuntime(); err == nil && daemonInfo != nil {
 				fmt.Print("Restarting daemon... ")
-				// Stop old daemon
+				// Stop old daemon with timeout
 				stopURL := fmt.Sprintf("http://%s/api/shutdown", daemonInfo.Addr)
-				http.Post(stopURL, "application/json", nil)
+				client := &http.Client{Timeout: 5 * time.Second}
+				if resp, err := client.Post(stopURL, "application/json", nil); err != nil {
+					fmt.Printf("warning: failed to stop daemon: %v\n", err)
+				} else {
+					resp.Body.Close()
+				}
 				time.Sleep(500 * time.Millisecond)
 
 				// Start new daemon
@@ -890,8 +895,11 @@ Requires confirmation before making changes (use --yes to skip).`,
 					daemonPath += ".exe"
 				}
 				startCmd := exec.Command(daemonPath)
-				startCmd.Start()
-				fmt.Println("OK")
+				if err := startCmd.Start(); err != nil {
+					fmt.Printf("warning: failed to start daemon: %v\n", err)
+				} else {
+					fmt.Println("OK")
+				}
 			}
 
 			return nil
