@@ -720,8 +720,9 @@ func (m tuiModel) renderQueueView() string {
 		// Jobs
 		for i := start; i < end; i++ {
 			job := m.jobs[i]
-			line := m.renderJobLine(job)
-			if i == m.selectedIdx {
+			selected := i == m.selectedIdx
+			line := m.renderJobLine(job, selected)
+			if selected {
 				line = tuiSelectedStyle.Render("> " + line)
 			} else {
 				line = "  " + line
@@ -746,7 +747,7 @@ func (m tuiModel) renderQueueView() string {
 	return b.String()
 }
 
-func (m tuiModel) renderJobLine(job storage.ReviewJob) string {
+func (m tuiModel) renderJobLine(job storage.ReviewJob, selected bool) string {
 	ref := shortRef(job.GitRef)
 
 	repo := job.RepoName
@@ -772,26 +773,31 @@ func (m tuiModel) renderJobLine(job storage.ReviewJob) string {
 		}
 	}
 
-	// Color the status, then pad to fixed width (lipgloss strips trailing spaces)
-	// Show retry count for queued/running jobs (e.g., "queued(1)")
+	// Format status with retry count for queued/running jobs (e.g., "queued(1)")
 	status := string(job.Status)
 	if job.RetryCount > 0 && (job.Status == storage.JobStatusQueued || job.Status == storage.JobStatusRunning) {
 		status = fmt.Sprintf("%s(%d)", job.Status, job.RetryCount)
 	}
+
+	// Color the status only when not selected (selection style should be uniform)
 	var styledStatus string
-	switch job.Status {
-	case storage.JobStatusQueued:
-		styledStatus = tuiQueuedStyle.Render(status)
-	case storage.JobStatusRunning:
-		styledStatus = tuiRunningStyle.Render(status)
-	case storage.JobStatusDone:
-		styledStatus = tuiDoneStyle.Render(status)
-	case storage.JobStatusFailed:
-		styledStatus = tuiFailedStyle.Render(status)
-	case storage.JobStatusCanceled:
-		styledStatus = tuiCanceledStyle.Render(status)
-	default:
+	if selected {
 		styledStatus = status
+	} else {
+		switch job.Status {
+		case storage.JobStatusQueued:
+			styledStatus = tuiQueuedStyle.Render(status)
+		case storage.JobStatusRunning:
+			styledStatus = tuiRunningStyle.Render(status)
+		case storage.JobStatusDone:
+			styledStatus = tuiDoneStyle.Render(status)
+		case storage.JobStatusFailed:
+			styledStatus = tuiFailedStyle.Render(status)
+		case storage.JobStatusCanceled:
+			styledStatus = tuiCanceledStyle.Render(status)
+		default:
+			styledStatus = status
+		}
 	}
 	// Pad after coloring since lipgloss strips trailing spaces
 	// Width 10 accommodates "running(3)" (10 chars)
