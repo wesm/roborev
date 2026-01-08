@@ -20,6 +20,7 @@ import (
 	"github.com/wesm/roborev/internal/daemon"
 	"github.com/wesm/roborev/internal/git"
 	"github.com/wesm/roborev/internal/storage"
+	"github.com/wesm/roborev/internal/update"
 	"github.com/wesm/roborev/internal/version"
 )
 
@@ -48,6 +49,7 @@ func main() {
 	rootCmd.AddCommand(uninstallHookCmd())
 	rootCmd.AddCommand(daemonCmd())
 	rootCmd.AddCommand(tuiCmd())
+	rootCmd.AddCommand(updateCmd())
 	rootCmd.AddCommand(versionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
@@ -790,6 +792,116 @@ func uninstallHookCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func updateCmd() *cobra.Command {
+	var checkOnly bool
+	var yes bool
+
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update roborev to the latest version",
+		Long: `Check for and install roborev updates.
+
+Shows exactly what will be downloaded and where it will be installed.
+Requires confirmation before making changes (use --yes to skip).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("Checking for updates...")
+
+			info, err := update.CheckForUpdate(true) // Force check, ignore cache
+			if err != nil {
+				return fmt.Errorf("check for updates: %w", err)
+			}
+
+			if info == nil {
+				fmt.Printf("Already running latest version (%s)\n", version.Version)
+				return nil
+			}
+
+			fmt.Printf("\n  Current version: %s\n", info.CurrentVersion)
+			fmt.Printf("  Latest version:  %s\n", info.LatestVersion)
+			fmt.Println("\nUpdate available!")
+			fmt.Println("\nDownload:")
+			fmt.Printf("  URL:  %s\n", info.DownloadURL)
+			fmt.Printf("  Size: %s\n", update.FormatSize(info.Size))
+			if info.Checksum != "" {
+				fmt.Printf("  SHA256: %s\n", info.Checksum)
+			}
+
+			// Show install location
+			currentExe, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("find executable: %w", err)
+			}
+			currentExe, _ = filepath.EvalSymlinks(currentExe)
+			binDir := filepath.Dir(currentExe)
+
+			fmt.Println("\nInstall location:")
+			fmt.Printf("  %s\n", binDir)
+
+			if checkOnly {
+				return nil
+			}
+
+			// Confirm
+			if !yes {
+				fmt.Print("\nProceed with update? [y/N] ")
+				var response string
+				fmt.Scanln(&response)
+				if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+					fmt.Println("Update cancelled")
+					return nil
+				}
+			}
+
+			fmt.Println()
+
+			// Progress display
+			var lastPercent int
+			progressFn := func(downloaded, total int64) {
+				if total > 0 {
+					percent := int(downloaded * 100 / total)
+					if percent != lastPercent {
+						fmt.Printf("\rDownloading... %d%% (%s / %s)",
+							percent, update.FormatSize(downloaded), update.FormatSize(total))
+						lastPercent = percent
+					}
+				}
+			}
+
+			// Perform update
+			if err := update.PerformUpdate(info, progressFn); err != nil {
+				return fmt.Errorf("update failed: %w", err)
+			}
+
+			fmt.Printf("\nUpdated to %s\n", info.LatestVersion)
+
+			// Restart daemon if running
+			if daemonInfo, err := daemon.ReadRuntime(); err == nil && daemonInfo != nil {
+				fmt.Print("Restarting daemon... ")
+				// Stop old daemon
+				stopURL := fmt.Sprintf("http://%s/api/shutdown", daemonInfo.Addr)
+				http.Post(stopURL, "application/json", nil)
+				time.Sleep(500 * time.Millisecond)
+
+				// Start new daemon
+				daemonPath := filepath.Join(binDir, "roborevd")
+				if runtime.GOOS == "windows" {
+					daemonPath += ".exe"
+				}
+				startCmd := exec.Command(daemonPath)
+				startCmd.Start()
+				fmt.Println("OK")
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&checkOnly, "check", false, "only check for updates, don't install")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
+
+	return cmd
 }
 
 func versionCmd() *cobra.Command {

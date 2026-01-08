@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/wesm/roborev/internal/daemon"
 	"github.com/wesm/roborev/internal/storage"
+	"github.com/wesm/roborev/internal/update"
 	"github.com/wesm/roborev/internal/version"
 )
 
@@ -65,6 +66,7 @@ type tuiModel struct {
 	width           int
 	height          int
 	err             error
+	updateAvailable string // Latest version if update available, empty if up to date
 }
 
 type tuiTickMsg time.Time
@@ -87,6 +89,7 @@ type tuiCancelResultMsg struct {
 	err           error
 }
 type tuiErrMsg error
+type tuiUpdateCheckMsg string // Latest version if available, empty if up to date
 
 func newTuiModel(serverAddr string) tuiModel {
 	// Get daemon version from runtime info
@@ -112,6 +115,7 @@ func (m tuiModel) Init() tea.Cmd {
 		m.tick(),
 		m.fetchJobs(),
 		m.fetchStatus(),
+		m.checkForUpdate(),
 	)
 }
 
@@ -160,6 +164,16 @@ func (m tuiModel) fetchStatus() tea.Cmd {
 			return tuiErrMsg(err)
 		}
 		return tuiStatusMsg(status)
+	}
+}
+
+func (m tuiModel) checkForUpdate() tea.Cmd {
+	return func() tea.Msg {
+		info, err := update.CheckForUpdate(false) // Use cache
+		if err != nil || info == nil {
+			return tuiUpdateCheckMsg("") // No update or error
+		}
+		return tuiUpdateCheckMsg(info.LatestVersion)
 	}
 }
 
@@ -622,6 +636,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiStatusMsg:
 		m.status = storage.DaemonStatus(msg)
 
+	case tuiUpdateCheckMsg:
+		m.updateAvailable = string(msg)
+
 	case tuiReviewMsg:
 		m.currentReview = msg
 		m.currentView = tuiViewReview
@@ -692,7 +709,15 @@ func (m tuiModel) renderQueueView() string {
 		m.status.CompletedJobs, m.status.FailedJobs,
 		m.status.CanceledJobs)
 	b.WriteString(tuiStatusStyle.Render(statusLine))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+
+	// Update notification
+	if m.updateAvailable != "" {
+		updateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
+		b.WriteString(updateStyle.Render(fmt.Sprintf("Update available: %s - run 'roborev update'", m.updateAvailable)))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 
 	if len(m.jobs) == 0 {
 		b.WriteString("No jobs in queue\n")
