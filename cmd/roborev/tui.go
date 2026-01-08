@@ -722,9 +722,18 @@ func (m tuiModel) renderQueueView() string {
 	if len(m.jobs) == 0 {
 		b.WriteString("No jobs in queue\n")
 	} else {
+		// Calculate ID column width based on max ID
+		idWidth := 2 // minimum width
+		for _, job := range m.jobs {
+			w := len(fmt.Sprintf("%d", job.ID))
+			if w > idWidth {
+				idWidth = w
+			}
+		}
+
 		// Header (with 2-char prefix to align with row selector)
-		header := fmt.Sprintf("  %-4s %-17s %-15s %-8s %-10s %-12s %-8s %s",
-			"ID", "Ref", "Repo", "Agent", "Status", "Queued", "Elapsed", "Addr'd")
+		header := fmt.Sprintf("  %-*s %-17s %-15s %-8s %-10s %-12s %-8s %s",
+			idWidth, "ID", "Ref", "Repo", "Agent", "Status", "Queued", "Elapsed", "Addr'd")
 		b.WriteString(tuiStatusStyle.Render(header))
 		b.WriteString("\n")
 		b.WriteString("  " + strings.Repeat("-", min(m.width-4, 80)))
@@ -759,7 +768,7 @@ func (m tuiModel) renderQueueView() string {
 		for i := start; i < end; i++ {
 			job := m.jobs[i]
 			selected := i == m.selectedIdx
-			line := m.renderJobLine(job, selected)
+			line := m.renderJobLine(job, selected, idWidth)
 			if selected {
 				line = tuiSelectedStyle.Render("> " + line)
 			} else {
@@ -785,7 +794,7 @@ func (m tuiModel) renderQueueView() string {
 	return b.String()
 }
 
-func (m tuiModel) renderJobLine(job storage.ReviewJob, selected bool) string {
+func (m tuiModel) renderJobLine(job storage.ReviewJob, selected bool, idWidth int) string {
 	ref := shortRef(job.GitRef)
 
 	repo := job.RepoName
@@ -854,8 +863,8 @@ func (m tuiModel) renderJobLine(job storage.ReviewJob, selected bool) string {
 		}
 	}
 
-	return fmt.Sprintf("%-4d %-17s %-15s %-8s %s %-12s %-8s %s",
-		job.ID, ref, repo, agent, styledStatus, enqueued, elapsed, addr)
+	return fmt.Sprintf("%-*d %-17s %-15s %-8s %s %-12s %-8s %s",
+		idWidth, job.ID, ref, repo, agent, styledStatus, enqueued, elapsed, addr)
 }
 
 // wrapText wraps text to the specified width, preserving existing line breaks
