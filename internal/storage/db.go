@@ -185,7 +185,11 @@ func (db *DB) migrate() error {
 			return fmt.Errorf("create new review_jobs table: %w", err)
 		}
 
-		_, err = tx.Exec(`INSERT INTO review_jobs_new SELECT * FROM review_jobs`)
+		_, err = tx.Exec(`
+			INSERT INTO review_jobs_new (id, repo_id, commit_id, git_ref, agent, status, enqueued_at, started_at, finished_at, worker_id, error, prompt, retry_count)
+			SELECT id, repo_id, commit_id, git_ref, agent, status, enqueued_at, started_at, finished_at, worker_id, error, prompt, retry_count
+			FROM review_jobs
+		`)
 		if err != nil {
 			return fmt.Errorf("copy review_jobs data: %w", err)
 		}
