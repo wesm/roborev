@@ -262,6 +262,13 @@ func initCmd() *cobra.Command {
 			hookPath := filepath.Join(hooksDir, "post-commit")
 			hookContent := `#!/bin/sh
 # RoboRev post-commit hook - auto-reviews every commit
+
+# Skip during rebase to avoid reviewing every replayed commit
+git_dir=$(git rev-parse --git-dir 2>/dev/null)
+if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then
+    exit 0
+fi
+
 roborev enqueue --sha HEAD 2>/dev/null &
 `
 			// Ensure hooks directory exists
@@ -726,6 +733,13 @@ func installHookCmd() *cobra.Command {
 
 			hookContent := `#!/bin/sh
 # RoboRev post-commit hook - auto-reviews every commit
+
+# Skip during rebase to avoid reviewing every replayed commit
+git_dir=$(git rev-parse --git-dir 2>/dev/null)
+if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then
+    exit 0
+fi
+
 roborev enqueue --sha HEAD 2>/dev/null &
 `
 
