@@ -42,12 +42,13 @@ func TestE2EEnqueueAndReview(t *testing.T) {
 
 	// Add handlers manually (simulating the server)
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		queued, running, done, failed, _ := db.GetJobCounts()
+		queued, running, done, failed, canceled, _ := db.GetJobCounts()
 		status := storage.DaemonStatus{
 			QueuedJobs:    queued,
 			RunningJobs:   running,
 			CompletedJobs: done,
 			FailedJobs:    failed,
+			CanceledJobs:  canceled,
 			MaxWorkers:    4,
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -108,7 +109,7 @@ func TestDatabaseIntegration(t *testing.T) {
 	}
 
 	// Verify initial state
-	queued, running, done, _, _ := db.GetJobCounts()
+	queued, running, done, _, _, _ := db.GetJobCounts()
 	if queued != 1 {
 		t.Errorf("Expected 1 queued job, got %d", queued)
 	}
@@ -128,7 +129,7 @@ func TestDatabaseIntegration(t *testing.T) {
 	}
 
 	// Verify running state
-	_, running, _, _, _ = db.GetJobCounts()
+	_, running, _, _, _, _ = db.GetJobCounts()
 	if running != 1 {
 		t.Errorf("Expected 1 running job, got %d", running)
 	}
@@ -140,7 +141,7 @@ func TestDatabaseIntegration(t *testing.T) {
 	}
 
 	// Verify completed state
-	queued, running, done, _, _ = db.GetJobCounts()
+	queued, running, done, _, _, _ = db.GetJobCounts()
 	if done != 1 {
 		t.Errorf("Expected 1 completed job, got %d", done)
 	}

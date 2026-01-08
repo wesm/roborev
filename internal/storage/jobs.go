@@ -165,6 +165,27 @@ func (db *DB) FailJob(jobID int64, errorMsg string) error {
 	return err
 }
 
+// CancelJob marks a running or queued job as canceled
+func (db *DB) CancelJob(jobID int64) error {
+	now := time.Now().Format(time.RFC3339)
+	result, err := db.Exec(`
+		UPDATE review_jobs
+		SET status = 'canceled', finished_at = ?
+		WHERE id = ? AND status IN ('queued', 'running')
+	`, now, jobID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // RetryJob atomically resets a running job to queued for retry.
 // Returns false if max retries reached or job is not in running state.
 // maxRetries is the number of retries allowed (e.g., 3 means up to 4 total attempts).
@@ -329,7 +350,7 @@ func (db *DB) GetJobByID(id int64) (*ReviewJob, error) {
 }
 
 // GetJobCounts returns counts of jobs by status
-func (db *DB) GetJobCounts() (queued, running, done, failed int, err error) {
+func (db *DB) GetJobCounts() (queued, running, done, failed, canceled int, err error) {
 	rows, err := db.Query(`SELECT status, COUNT(*) FROM review_jobs GROUP BY status`)
 	if err != nil {
 		return
@@ -351,6 +372,8 @@ func (db *DB) GetJobCounts() (queued, running, done, failed int, err error) {
 			done = count
 		case JobStatusFailed:
 			failed = count
+		case JobStatusCanceled:
+			canceled = count
 		}
 	}
 	err = rows.Err()

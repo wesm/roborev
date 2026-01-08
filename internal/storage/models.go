@@ -22,10 +22,11 @@ type Commit struct {
 type JobStatus string
 
 const (
-	JobStatusQueued  JobStatus = "queued"
-	JobStatusRunning JobStatus = "running"
-	JobStatusDone    JobStatus = "done"
-	JobStatusFailed  JobStatus = "failed"
+	JobStatusQueued   JobStatus = "queued"
+	JobStatusRunning  JobStatus = "running"
+	JobStatusDone     JobStatus = "done"
+	JobStatusFailed   JobStatus = "failed"
+	JobStatusCanceled JobStatus = "canceled"
 )
 
 type ReviewJob struct {
@@ -76,6 +77,7 @@ type DaemonStatus struct {
 	RunningJobs   int `json:"running_jobs"`
 	CompletedJobs int `json:"completed_jobs"`
 	FailedJobs    int `json:"failed_jobs"`
+	CanceledJobs  int `json:"canceled_jobs"`
 	ActiveWorkers int `json:"active_workers"`
 	MaxWorkers    int `json:"max_workers"`
 }

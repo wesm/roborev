@@ -30,10 +30,11 @@ var (
 				Bold(true).
 				Foreground(lipgloss.Color("212"))
 
-	tuiQueuedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("226")) // Yellow
-	tuiRunningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("33"))  // Blue
-	tuiDoneStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))  // Green
-	tuiFailedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // Red
+	tuiQueuedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("226")) // Yellow
+	tuiRunningStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("33"))  // Blue
+	tuiDoneStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))  // Green
+	tuiFailedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // Red
+	tuiCanceledStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // Orange
 
 	tuiHelpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")).
@@ -78,6 +79,11 @@ type tuiAddressedResultMsg struct {
 	reviewView bool  // true if from review view (rollback currentReview)
 	oldState   bool
 	err        error
+}
+type tuiCancelResultMsg struct {
+	jobID    int64
+	oldState storage.JobStatus
+	err      error
 }
 type tuiErrMsg error
 
@@ -345,6 +351,41 @@ func (m *tuiModel) setJobAddressed(jobID int64, state bool) {
 	}
 }
 
+// setJobStatus updates the status for a job by ID
+func (m *tuiModel) setJobStatus(jobID int64, status storage.JobStatus) {
+	for i := range m.jobs {
+		if m.jobs[i].ID == jobID {
+			m.jobs[i].Status = status
+			return
+		}
+	}
+}
+
+// cancelJob sends a cancel request to the server
+func (m tuiModel) cancelJob(jobID int64, oldStatus storage.JobStatus) tea.Cmd {
+	return func() tea.Msg {
+		reqBody, err := json.Marshal(map[string]interface{}{
+			"job_id": jobID,
+		})
+		if err != nil {
+			return tuiCancelResultMsg{jobID: jobID, oldState: oldStatus, err: err}
+		}
+		resp, err := m.client.Post(m.serverAddr+"/api/job/cancel", "application/json", bytes.NewReader(reqBody))
+		if err != nil {
+			return tuiCancelResultMsg{jobID: jobID, oldState: oldStatus, err: err}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNotFound {
+			return tuiCancelResultMsg{jobID: jobID, oldState: oldStatus, err: fmt.Errorf("job not cancellable")}
+		}
+		if resp.StatusCode != http.StatusOK {
+			return tuiCancelResultMsg{jobID: jobID, oldState: oldStatus, err: fmt.Errorf("cancel job: %s", resp.Status)}
+		}
+		return tuiCancelResultMsg{jobID: jobID, oldState: oldStatus, err: nil}
+	}
+}
+
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -500,6 +541,17 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "x":
+			// Cancel a running or queued job (optimistic update)
+			if m.currentView == tuiViewQueue && len(m.jobs) > 0 && m.selectedIdx >= 0 && m.selectedIdx < len(m.jobs) {
+				job := &m.jobs[m.selectedIdx]
+				if job.Status == storage.JobStatusRunning || job.Status == storage.JobStatusQueued {
+					oldStatus := job.Status
+					job.Status = storage.JobStatusCanceled // Optimistic update
+					return m, m.cancelJob(job.ID, oldStatus)
+				}
+			}
+
 		case "esc":
 			if m.currentView == tuiViewReview {
 				m.currentView = tuiViewQueue
@@ -587,6 +639,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		}
 
+	case tuiCancelResultMsg:
+		if msg.err != nil {
+			// Rollback optimistic update on error
+			m.setJobStatus(msg.jobID, msg.oldState)
+			m.err = msg.err
+		}
+
 	case tuiErrMsg:
 		m.err = msg
 	}
@@ -612,11 +671,11 @@ func (m tuiModel) renderQueueView() string {
 	b.WriteString("\n")
 
 	// Status line
-	statusLine := fmt.Sprintf("Workers: %d/%d | Queued: %d | Running: %d | Done: %d | Failed: %d | Size: %dx%d",
+	statusLine := fmt.Sprintf("Workers: %d/%d | Queued: %d | Running: %d | Done: %d | Failed: %d | Canceled: %d",
 		m.status.ActiveWorkers, m.status.MaxWorkers,
 		m.status.QueuedJobs, m.status.RunningJobs,
 		m.status.CompletedJobs, m.status.FailedJobs,
-		m.width, m.height)
+		m.status.CanceledJobs)
 	b.WriteString(tuiStatusStyle.Render(statusLine))
 	b.WriteString("\n\n")
 
@@ -632,8 +691,8 @@ func (m tuiModel) renderQueueView() string {
 		b.WriteString("\n")
 
 		// Calculate visible job range based on terminal height
-		// Reserve lines for: title(2) + status(2) + header(2) + help(2) + scroll indicator(1)
-		reservedLines := 9
+		// Reserve lines for: title(2) + status(2) + header(2) + help(3) + scroll indicator(1)
+		reservedLines := 10
 		visibleJobs := m.height - reservedLines
 		if visibleJobs < 3 {
 			visibleJobs = 3 // Show at least 3 jobs
@@ -677,8 +736,10 @@ func (m tuiModel) renderQueueView() string {
 		}
 	}
 
-	// Help
-	b.WriteString(tuiHelpStyle.Render("up/down/pgup/pgdn: navigate | enter: review | p: prompt | a: toggle addressed | q: quit"))
+	// Help (two lines)
+	helpText := "up/down/pgup/pgdn: navigate | enter: review | p: prompt | q: quit\n" +
+		"a: toggle addressed | x: cancel running/queued job"
+	b.WriteString(tuiHelpStyle.Render(helpText))
 
 	return b.String()
 }
@@ -725,6 +786,8 @@ func (m tuiModel) renderJobLine(job storage.ReviewJob) string {
 		styledStatus = tuiDoneStyle.Render(status)
 	case storage.JobStatusFailed:
 		styledStatus = tuiFailedStyle.Render(status)
+	case storage.JobStatusCanceled:
+		styledStatus = tuiCanceledStyle.Render(status)
 	default:
 		styledStatus = status
 	}

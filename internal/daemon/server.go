@@ -36,6 +36,7 @@ func NewServer(db *storage.DB, cfg *config.Config) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/enqueue", s.handleEnqueue)
 	mux.HandleFunc("/api/jobs", s.handleListJobs)
+	mux.HandleFunc("/api/job/cancel", s.handleCancelJob)
 	mux.HandleFunc("/api/review", s.handleGetReview)
 	mux.HandleFunc("/api/review/address", s.handleAddressReview)
 	mux.HandleFunc("/api/respond", s.handleAddResponse)
@@ -242,6 +243,39 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"jobs": jobs})
 }
 
+type CancelJobRequest struct {
+	JobID int64 `json:"job_id"`
+}
+
+func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req CancelJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.JobID == 0 {
+		writeError(w, http.StatusBadRequest, "job_id is required")
+		return
+	}
+
+	if err := s.db.CancelJob(req.JobID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "job not found or not cancellable")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("cancel job: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
 func (s *Server) handleGetReview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -339,7 +373,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queued, running, done, failed, err := s.db.GetJobCounts()
+	queued, running, done, failed, canceled, err := s.db.GetJobCounts()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("get counts: %v", err))
 		return
@@ -350,6 +384,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		RunningJobs:   running,
 		CompletedJobs: done,
 		FailedJobs:    failed,
+		CanceledJobs:  canceled,
 		ActiveWorkers: s.workerPool.ActiveWorkers(),
 		MaxWorkers:    s.cfg.MaxWorkers,
 	}

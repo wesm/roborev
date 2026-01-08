@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS review_jobs (
   commit_id INTEGER REFERENCES commits(id),
   git_ref TEXT NOT NULL,
   agent TEXT NOT NULL DEFAULT 'codex',
-  status TEXT NOT NULL CHECK(status IN ('queued','running','done','failed')) DEFAULT 'queued',
+  status TEXT NOT NULL CHECK(status IN ('queued','running','done','failed','canceled')) DEFAULT 'queued',
   enqueued_at TEXT NOT NULL DEFAULT (datetime('now')),
   started_at TEXT,
   finished_at TEXT,

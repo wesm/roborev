@@ -309,7 +309,7 @@ func TestJobCounts(t *testing.T) {
 		db.FailJob(claimed2.ID, "err")
 	}
 
-	queued, _, done, failed, err := db.GetJobCounts()
+	queued, _, done, failed, _, err := db.GetJobCounts()
 	if err != nil {
 		t.Fatalf("GetJobCounts failed: %v", err)
 	}
