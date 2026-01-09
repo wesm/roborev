@@ -236,11 +236,19 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	repo := r.URL.Query().Get("repo")
 
 	// Parse limit from query, default to 50, 0 means no limit
+	// Clamp to valid range: 0 (unlimited) or 1-10000
+	const maxLimit = 10000
 	limit := 50
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if _, err := fmt.Sscanf(limitStr, "%d", &limit); err != nil {
 			limit = 50
 		}
+	}
+	// Clamp negative to 0, and cap at maxLimit (0 = unlimited is allowed)
+	if limit < 0 {
+		limit = 0
+	} else if limit > maxLimit {
+		limit = maxLimit
 	}
 
 	jobs, err := s.db.ListJobs(status, repo, limit)

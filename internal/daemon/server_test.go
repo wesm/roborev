@@ -312,6 +312,75 @@ func TestHandleListJobsWithFilter(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("negative limit treated as unlimited", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs?limit=-1", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var response struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+
+		// Negative clamped to 0 (unlimited), should return all 5 jobs
+		if len(response.Jobs) != 5 {
+			t.Errorf("Expected 5 jobs with limit=-1 (clamped to unlimited), got %d", len(response.Jobs))
+		}
+	})
+
+	t.Run("very large limit capped to max", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs?limit=999999", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var response struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+
+		// Large limit capped to 10000, but we only have 5 jobs
+		if len(response.Jobs) != 5 {
+			t.Errorf("Expected 5 jobs (all available), got %d", len(response.Jobs))
+		}
+	})
+
+	t.Run("invalid limit uses default", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs?limit=abc", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var response struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+
+		// Invalid limit uses default (50), we have 5 jobs
+		if len(response.Jobs) != 5 {
+			t.Errorf("Expected 5 jobs with invalid limit (uses default), got %d", len(response.Jobs))
+		}
+	})
 }
 
 func TestHandleStatus(t *testing.T) {
