@@ -1,0 +1,4 @@
+review_guidelines = """
+TUI overflow on very narrow terminals (e.g. 60 characters wide or less) is acceptable
+and so please omit pedantic comments on these extreme scenarios.
+"""
