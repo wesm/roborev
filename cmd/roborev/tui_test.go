@@ -31,8 +31,8 @@ func TestTUIFetchJobsSuccess(t *testing.T) {
 	if !ok {
 		t.Fatalf("Expected tuiJobsMsg, got %T: %v", msg, msg)
 	}
-	if len(jobs) != 1 || jobs[0].ID != 1 {
-		t.Errorf("Unexpected jobs: %+v", jobs)
+	if len(jobs.jobs) != 1 || jobs.jobs[0].ID != 1 {
+		t.Errorf("Unexpected jobs: %+v", jobs.jobs)
 	}
 }
 
@@ -402,9 +402,9 @@ func TestTUISelectionMaintainedOnInsert(t *testing.T) {
 	m.selectedJobID = 2
 
 	// New jobs added at the top (newer jobs first)
-	newJobs := tuiJobsMsg([]storage.ReviewJob{
+	newJobs := tuiJobsMsg{jobs: []storage.ReviewJob{
 		{ID: 5}, {ID: 4}, {ID: 3}, {ID: 2}, {ID: 1},
-	})
+	}}
 
 	updated, _ := m.Update(newJobs)
 	m = updated.(tuiModel)
@@ -429,9 +429,9 @@ func TestTUISelectionClampsOnRemoval(t *testing.T) {
 	m.selectedJobID = 1
 
 	// Job ID=1 is removed
-	newJobs := tuiJobsMsg([]storage.ReviewJob{
+	newJobs := tuiJobsMsg{jobs: []storage.ReviewJob{
 		{ID: 3}, {ID: 2},
-	})
+	}}
 
 	updated, _ := m.Update(newJobs)
 	m = updated.(tuiModel)
@@ -454,9 +454,9 @@ func TestTUISelectionFirstJobOnEmpty(t *testing.T) {
 	m.selectedJobID = 0
 
 	// Jobs arrive
-	newJobs := tuiJobsMsg([]storage.ReviewJob{
+	newJobs := tuiJobsMsg{jobs: []storage.ReviewJob{
 		{ID: 5}, {ID: 4}, {ID: 3},
-	})
+	}}
 
 	updated, _ := m.Update(newJobs)
 	m = updated.(tuiModel)
@@ -478,7 +478,7 @@ func TestTUISelectionEmptyList(t *testing.T) {
 	m.selectedIdx = 0
 	m.selectedJobID = 1
 
-	newJobs := tuiJobsMsg([]storage.ReviewJob{})
+	newJobs := tuiJobsMsg{jobs: []storage.ReviewJob{}}
 
 	updated, _ := m.Update(newJobs)
 	m = updated.(tuiModel)
@@ -573,7 +573,7 @@ func TestTUISelectionMaintainedOnLargeBatch(t *testing.T) {
 	}
 	newJobs[30] = storage.ReviewJob{ID: 1} // Original job at the end
 
-	updated, _ := m.Update(tuiJobsMsg(newJobs))
+	updated, _ := m.Update(tuiJobsMsg{jobs: newJobs})
 	m = updated.(tuiModel)
 
 	// Should still follow job ID=1, now at index 30
@@ -1372,11 +1372,11 @@ func TestTUIJobsRefreshWithFilter(t *testing.T) {
 	m.activeRepoFilter = "/path/to/repo-a"
 
 	// Jobs refresh - same jobs
-	newJobs := tuiJobsMsg([]storage.ReviewJob{
+	newJobs := tuiJobsMsg{jobs: []storage.ReviewJob{
 		{ID: 1, RepoName: "repo-a", RepoPath: "/path/to/repo-a"},
 		{ID: 2, RepoName: "repo-b", RepoPath: "/path/to/repo-b"},
 		{ID: 3, RepoName: "repo-a", RepoPath: "/path/to/repo-a"},
-	})
+	}}
 
 	updated, _ := m.Update(newJobs)
 	m2 := updated.(tuiModel)
@@ -1390,10 +1390,10 @@ func TestTUIJobsRefreshWithFilter(t *testing.T) {
 	}
 
 	// Now the selected job is removed
-	newJobs = tuiJobsMsg([]storage.ReviewJob{
+	newJobs = tuiJobsMsg{jobs: []storage.ReviewJob{
 		{ID: 1, RepoName: "repo-a", RepoPath: "/path/to/repo-a"},
 		{ID: 2, RepoName: "repo-b", RepoPath: "/path/to/repo-b"},
-	})
+	}}
 
 	updated, _ = m2.Update(newJobs)
 	m3 := updated.(tuiModel)
@@ -1467,7 +1467,7 @@ func TestTUIFilterToZeroVisibleJobs(t *testing.T) {
 	}
 
 	// Simulate receiving empty jobs from API (repo-b has no jobs)
-	updated2, _ := m2.Update(tuiJobsMsg([]storage.ReviewJob{}))
+	updated2, _ := m2.Update(tuiJobsMsg{jobs: []storage.ReviewJob{}})
 	m3 := updated2.(tuiModel)
 
 	// Now selection should be cleared since no jobs
@@ -1495,7 +1495,7 @@ func TestTUIRefreshWithZeroVisibleJobs(t *testing.T) {
 		{ID: 1, RepoName: "repo-a", RepoPath: "/path/to/repo-a"},
 		{ID: 2, RepoName: "repo-a", RepoPath: "/path/to/repo-a"},
 	}
-	updated, _ := m.Update(tuiJobsMsg(newJobs))
+	updated, _ := m.Update(tuiJobsMsg{jobs: newJobs})
 	m2 := updated.(tuiModel)
 
 	// Selection should be cleared since no jobs match filter
@@ -1956,12 +1956,12 @@ func TestTUISelectionSyncInReviewView(t *testing.T) {
 	m.currentReview = &storage.Review{ID: 20, Job: &storage.ReviewJob{ID: 2}}
 
 	// New job arrives at the top, shifting indices
-	newJobs := tuiJobsMsg([]storage.ReviewJob{
+	newJobs := tuiJobsMsg{jobs: []storage.ReviewJob{
 		{ID: 4, Status: storage.JobStatusDone}, // New job at top
 		{ID: 3, Status: storage.JobStatusDone},
 		{ID: 2, Status: storage.JobStatusDone}, // Now at index 2
 		{ID: 1, Status: storage.JobStatusDone},
-	})
+	}}
 
 	updated, _ := m.Update(newJobs)
 	m2 := updated.(tuiModel)
@@ -2065,11 +2065,11 @@ func TestTUIJobsRefreshDuringReviewNavigation(t *testing.T) {
 	m.selectedJobID = 3
 
 	// Before the review for job 3 arrives, a jobs refresh comes in
-	refreshedJobs := tuiJobsMsg([]storage.ReviewJob{
+	refreshedJobs := tuiJobsMsg{jobs: []storage.ReviewJob{
 		{ID: 1, Status: storage.JobStatusDone},
 		{ID: 2, Status: storage.JobStatusDone},
 		{ID: 3, Status: storage.JobStatusDone},
-	})
+	}}
 
 	updated, _ := m.Update(refreshedJobs)
 	m2 := updated.(tuiModel)
@@ -2121,7 +2121,7 @@ func TestTUIEmptyRefreshWhileViewingReview(t *testing.T) {
 	m.currentReview = &storage.Review{ID: 20, Output: "Review for job 2", Job: &storage.ReviewJob{ID: 2}}
 
 	// Transient empty refresh arrives
-	emptyJobs := tuiJobsMsg([]storage.ReviewJob{})
+	emptyJobs := tuiJobsMsg{jobs: []storage.ReviewJob{}}
 
 	updated, _ := m.Update(emptyJobs)
 	m2 := updated.(tuiModel)
@@ -2132,11 +2132,11 @@ func TestTUIEmptyRefreshWhileViewingReview(t *testing.T) {
 	}
 
 	// Jobs repopulate
-	repopulatedJobs := tuiJobsMsg([]storage.ReviewJob{
+	repopulatedJobs := tuiJobsMsg{jobs: []storage.ReviewJob{
 		{ID: 1, Status: storage.JobStatusDone},
 		{ID: 2, Status: storage.JobStatusDone},
 		{ID: 3, Status: storage.JobStatusDone},
-	})
+	}}
 
 	updated, _ = m2.Update(repopulatedJobs)
 	m3 := updated.(tuiModel)
@@ -2162,11 +2162,11 @@ func TestTUIEmptyRefreshSeedsFromCurrentReview(t *testing.T) {
 	m.currentReview = &storage.Review{ID: 20, Output: "Review for job 2", Job: &storage.ReviewJob{ID: 2}}
 
 	// Jobs repopulate
-	repopulatedJobs := tuiJobsMsg([]storage.ReviewJob{
+	repopulatedJobs := tuiJobsMsg{jobs: []storage.ReviewJob{
 		{ID: 1, Status: storage.JobStatusDone},
 		{ID: 2, Status: storage.JobStatusDone},
 		{ID: 3, Status: storage.JobStatusDone},
-	})
+	}}
 
 	updated, _ := m.Update(repopulatedJobs)
 	m2 := updated.(tuiModel)
@@ -2386,5 +2386,172 @@ func TestTUIRenderJobLineNoTruncation(t *testing.T) {
 	}
 	if !strings.Contains(line, "test") {
 		t.Error("Agent name should appear untruncated")
+	}
+}
+
+func TestTUIPaginationAppendMode(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Start with 50 jobs
+	initialJobs := make([]storage.ReviewJob, 50)
+	for i := 0; i < 50; i++ {
+		initialJobs[i] = storage.ReviewJob{ID: int64(50 - i)}
+	}
+	m.jobs = initialJobs
+	m.selectedIdx = 0
+	m.selectedJobID = 50
+	m.hasMore = true
+
+	// Append 25 more jobs
+	moreJobs := make([]storage.ReviewJob, 25)
+	for i := 0; i < 25; i++ {
+		moreJobs[i] = storage.ReviewJob{ID: int64(i + 1)} // IDs 1-25 (older)
+	}
+	appendMsg := tuiJobsMsg{jobs: moreJobs, hasMore: false, append: true}
+
+	updated, _ := m.Update(appendMsg)
+	m2 := updated.(tuiModel)
+
+	// Should now have 75 jobs
+	if len(m2.jobs) != 75 {
+		t.Errorf("Expected 75 jobs after append, got %d", len(m2.jobs))
+	}
+
+	// hasMore should be updated
+	if m2.hasMore {
+		t.Error("hasMore should be false after append with hasMore=false")
+	}
+
+	// loadingMore should be cleared
+	if m2.loadingMore {
+		t.Error("loadingMore should be cleared after append")
+	}
+
+	// Selection should be maintained
+	if m2.selectedJobID != 50 {
+		t.Errorf("Expected selectedJobID=50 maintained, got %d", m2.selectedJobID)
+	}
+}
+
+func TestTUIPaginationRefreshMaintainsView(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Simulate user has paginated to 100 jobs
+	jobs := make([]storage.ReviewJob, 100)
+	for i := 0; i < 100; i++ {
+		jobs[i] = storage.ReviewJob{ID: int64(100 - i)}
+	}
+	m.jobs = jobs
+	m.selectedIdx = 50
+	m.selectedJobID = 50
+
+	// Refresh arrives (replace mode, not append)
+	refreshedJobs := make([]storage.ReviewJob, 100)
+	for i := 0; i < 100; i++ {
+		refreshedJobs[i] = storage.ReviewJob{ID: int64(101 - i)} // New job at top
+	}
+	refreshMsg := tuiJobsMsg{jobs: refreshedJobs, hasMore: true, append: false}
+
+	updated, _ := m.Update(refreshMsg)
+	m2 := updated.(tuiModel)
+
+	// Should still have 100 jobs
+	if len(m2.jobs) != 100 {
+		t.Errorf("Expected 100 jobs after refresh, got %d", len(m2.jobs))
+	}
+
+	// Selection should find job ID=50 at new index
+	if m2.selectedJobID != 50 {
+		t.Errorf("Expected selectedJobID=50 maintained, got %d", m2.selectedJobID)
+	}
+	if m2.selectedIdx != 51 {
+		t.Errorf("Expected selectedIdx=51 (shifted by new job), got %d", m2.selectedIdx)
+	}
+}
+
+func TestTUILoadingMoreClearedOnPaginationError(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.loadingMore = true
+
+	// Pagination error arrives (only pagination errors clear loadingMore)
+	errMsg := tuiPaginationErrMsg{err: fmt.Errorf("network error")}
+	updated, _ := m.Update(errMsg)
+	m2 := updated.(tuiModel)
+
+	// loadingMore should be cleared so user can retry
+	if m2.loadingMore {
+		t.Error("loadingMore should be cleared on pagination error")
+	}
+
+	// Error should be set
+	if m2.err == nil {
+		t.Error("err should be set")
+	}
+}
+
+func TestTUILoadingMoreNotClearedOnGenericError(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.loadingMore = true
+
+	// Generic error arrives (should NOT clear loadingMore)
+	errMsg := tuiErrMsg(fmt.Errorf("some other error"))
+	updated, _ := m.Update(errMsg)
+	m2 := updated.(tuiModel)
+
+	// loadingMore should remain true - only pagination errors clear it
+	if !m2.loadingMore {
+		t.Error("loadingMore should NOT be cleared on generic error")
+	}
+
+	// Error should still be set
+	if m2.err == nil {
+		t.Error("err should be set")
+	}
+}
+
+func TestTUINavigateDownTriggersLoadMore(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Set up at last job with more available
+	m.jobs = []storage.ReviewJob{{ID: 1}}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.hasMore = true
+	m.loadingMore = false
+	m.currentView = tuiViewQueue
+
+	// Press down at bottom - should trigger load more
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m2 := updated.(tuiModel)
+
+	if !m2.loadingMore {
+		t.Error("loadingMore should be set when navigating past last job")
+	}
+	if cmd == nil {
+		t.Error("Should return fetchMoreJobs command")
+	}
+}
+
+func TestTUINavigateDownNoLoadMoreWhenFiltered(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Set up at last job with filter active
+	m.jobs = []storage.ReviewJob{{ID: 1, RepoPath: "/path/to/repo"}}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.hasMore = true
+	m.loadingMore = false
+	m.activeRepoFilter = "/path/to/repo" // Filter active
+	m.currentView = tuiViewQueue
+
+	// Press down at bottom - should NOT trigger load more (filtered view loads all)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m2 := updated.(tuiModel)
+
+	if m2.loadingMore {
+		t.Error("loadingMore should not be set when filter is active")
+	}
+	if cmd != nil {
+		t.Error("Should not return command when filter is active")
 	}
 }

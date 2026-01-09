@@ -251,13 +251,41 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		limit = maxLimit
 	}
 
-	jobs, err := s.db.ListJobs(status, repo, limit)
+	// Parse offset from query, default to 0
+	// Offset is ignored when limit=0 (unlimited) since OFFSET requires LIMIT in SQL
+	offset := 0
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if _, err := fmt.Sscanf(offsetStr, "%d", &offset); err != nil {
+			offset = 0
+		}
+	}
+	if offset < 0 || limit == 0 {
+		offset = 0
+	}
+
+	// Fetch one extra to determine if there are more results
+	fetchLimit := limit
+	if limit > 0 {
+		fetchLimit = limit + 1
+	}
+
+	jobs, err := s.db.ListJobs(status, repo, fetchLimit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list jobs: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"jobs": jobs})
+	// Determine if there are more results
+	hasMore := false
+	if limit > 0 && len(jobs) > limit {
+		hasMore = true
+		jobs = jobs[:limit] // Trim to requested limit
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"jobs":     jobs,
+		"has_more": hasMore,
+	})
 }
 
 func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {

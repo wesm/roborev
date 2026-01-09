@@ -1081,7 +1081,7 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 	}
 
 	t.Run("no filter returns all jobs", func(t *testing.T) {
-		jobs, err := db.ListJobs("", "", 50)
+		jobs, err := db.ListJobs("", "", 50, 0)
 		if err != nil {
 			t.Fatalf("ListJobs failed: %v", err)
 		}
@@ -1092,7 +1092,7 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 
 	t.Run("repo filter returns only matching jobs", func(t *testing.T) {
 		// Filter by root_path (not name) since repos with same name could exist at different paths
-		jobs, err := db.ListJobs("", repo1.RootPath, 50)
+		jobs, err := db.ListJobs("", repo1.RootPath, 50, 0)
 		if err != nil {
 			t.Fatalf("ListJobs failed: %v", err)
 		}
@@ -1107,7 +1107,7 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 	})
 
 	t.Run("limit parameter works", func(t *testing.T) {
-		jobs, err := db.ListJobs("", "", 2)
+		jobs, err := db.ListJobs("", "", 2, 0)
 		if err != nil {
 			t.Fatalf("ListJobs failed: %v", err)
 		}
@@ -1117,7 +1117,7 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 	})
 
 	t.Run("limit=0 returns all jobs", func(t *testing.T) {
-		jobs, err := db.ListJobs("", "", 0)
+		jobs, err := db.ListJobs("", "", 0, 0)
 		if err != nil {
 			t.Fatalf("ListJobs failed: %v", err)
 		}
@@ -1127,7 +1127,7 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 	})
 
 	t.Run("repo filter with limit", func(t *testing.T) {
-		jobs, err := db.ListJobs("", repo1.RootPath, 2)
+		jobs, err := db.ListJobs("", repo1.RootPath, 2, 0)
 		if err != nil {
 			t.Fatalf("ListJobs failed: %v", err)
 		}
@@ -1152,7 +1152,7 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 		}
 
 		// Query for done jobs in repo1
-		jobs, err := db.ListJobs("done", repo1.RootPath, 50)
+		jobs, err := db.ListJobs("done", repo1.RootPath, 50, 0)
 		if err != nil {
 			t.Fatalf("ListJobs failed: %v", err)
 		}
@@ -1161,6 +1161,45 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 		}
 		if len(jobs) > 0 && jobs[0].Status != JobStatusDone {
 			t.Errorf("Expected status 'done', got '%s'", jobs[0].Status)
+		}
+	})
+
+	t.Run("offset pagination", func(t *testing.T) {
+		// Get first 2 jobs
+		jobs1, err := db.ListJobs("", "", 2, 0)
+		if err != nil {
+			t.Fatalf("ListJobs failed: %v", err)
+		}
+		if len(jobs1) != 2 {
+			t.Errorf("Expected 2 jobs, got %d", len(jobs1))
+		}
+
+		// Get next 2 jobs with offset
+		jobs2, err := db.ListJobs("", "", 2, 2)
+		if err != nil {
+			t.Fatalf("ListJobs failed: %v", err)
+		}
+		if len(jobs2) != 2 {
+			t.Errorf("Expected 2 jobs with offset=2, got %d", len(jobs2))
+		}
+
+		// Ensure no overlap
+		for _, j1 := range jobs1 {
+			for _, j2 := range jobs2 {
+				if j1.ID == j2.ID {
+					t.Errorf("Job %d appears in both pages", j1.ID)
+				}
+			}
+		}
+
+		// Get remaining job with offset=4
+		jobs3, err := db.ListJobs("", "", 2, 4)
+		if err != nil {
+			t.Fatalf("ListJobs failed: %v", err)
+		}
+		// 5 jobs total, offset 4 should give 1
+		if len(jobs3) != 1 {
+			t.Errorf("Expected 1 job with offset=4, got %d", len(jobs3))
 		}
 	})
 }

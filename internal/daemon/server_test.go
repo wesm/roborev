@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -556,6 +557,145 @@ func TestHandleCancelJob(t *testing.T) {
 		}
 		if updated.Status != storage.JobStatusCanceled {
 			t.Errorf("Expected status 'canceled', got '%s'", updated.Status)
+		}
+	})
+}
+
+func TestListJobsPagination(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open test DB: %v", err)
+	}
+	defer db.Close()
+
+	cfg := config.DefaultConfig()
+	server := NewServer(db, cfg)
+
+	// Create test repo and jobs
+	repo, err := db.GetOrCreateRepo("/test/repo")
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+
+	// Create 10 jobs
+	for i := 0; i < 10; i++ {
+		commit, err := db.GetOrCreateCommit(repo.ID, fmt.Sprintf("sha%d", i), "author", fmt.Sprintf("subject%d", i), time.Now())
+		if err != nil {
+			t.Fatalf("GetOrCreateCommit failed: %v", err)
+		}
+		_, err = db.EnqueueJob(repo.ID, commit.ID, fmt.Sprintf("sha%d", i), "test")
+		if err != nil {
+			t.Fatalf("EnqueueJob failed: %v", err)
+		}
+	}
+
+	t.Run("has_more true when more jobs exist", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/jobs?limit=5", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", w.Code)
+		}
+
+		var result struct {
+			Jobs    []storage.ReviewJob `json:"jobs"`
+			HasMore bool                `json:"has_more"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if len(result.Jobs) != 5 {
+			t.Errorf("Expected 5 jobs, got %d", len(result.Jobs))
+		}
+		if !result.HasMore {
+			t.Error("Expected has_more=true when more jobs exist")
+		}
+	})
+
+	t.Run("has_more false when no more jobs", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/jobs?limit=50", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", w.Code)
+		}
+
+		var result struct {
+			Jobs    []storage.ReviewJob `json:"jobs"`
+			HasMore bool                `json:"has_more"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if len(result.Jobs) != 10 {
+			t.Errorf("Expected 10 jobs, got %d", len(result.Jobs))
+		}
+		if result.HasMore {
+			t.Error("Expected has_more=false when all jobs returned")
+		}
+	})
+
+	t.Run("offset skips jobs", func(t *testing.T) {
+		// First page
+		req1 := httptest.NewRequest("GET", "/api/jobs?limit=3&offset=0", nil)
+		w1 := httptest.NewRecorder()
+		server.handleListJobs(w1, req1)
+
+		var result1 struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		json.NewDecoder(w1.Body).Decode(&result1)
+
+		// Second page
+		req2 := httptest.NewRequest("GET", "/api/jobs?limit=3&offset=3", nil)
+		w2 := httptest.NewRecorder()
+		server.handleListJobs(w2, req2)
+
+		var result2 struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		json.NewDecoder(w2.Body).Decode(&result2)
+
+		// Ensure no overlap
+		for _, j1 := range result1.Jobs {
+			for _, j2 := range result2.Jobs {
+				if j1.ID == j2.ID {
+					t.Errorf("Job %d appears in both pages", j1.ID)
+				}
+			}
+		}
+	})
+
+	t.Run("offset ignored when limit=0", func(t *testing.T) {
+		// limit=0 means unlimited, offset should be ignored
+		req := httptest.NewRequest("GET", "/api/jobs?limit=0&offset=5", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", w.Code)
+		}
+
+		var result struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		// Should return all 10 jobs since offset is ignored with limit=0
+		if len(result.Jobs) != 10 {
+			t.Errorf("Expected 10 jobs (offset ignored with limit=0), got %d", len(result.Jobs))
 		}
 	})
 }

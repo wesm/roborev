@@ -230,7 +230,7 @@ func (db *DB) GetJobRetryCount(jobID int64) (int, error) {
 }
 
 // ListJobs returns jobs with optional status and repo filters
-func (db *DB) ListJobs(statusFilter string, repoFilter string, limit int) ([]ReviewJob, error) {
+func (db *DB) ListJobs(statusFilter string, repoFilter string, limit, offset int) ([]ReviewJob, error) {
 	query := `
 		SELECT j.id, j.repo_id, j.commit_id, j.git_ref, j.agent, j.status, j.enqueued_at,
 		       j.started_at, j.finished_at, j.worker_id, j.error, j.prompt, j.retry_count,
@@ -261,6 +261,11 @@ func (db *DB) ListJobs(statusFilter string, repoFilter string, limit int) ([]Rev
 	if limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit)
+		// OFFSET requires LIMIT in SQLite
+		if offset > 0 {
+			query += " OFFSET ?"
+			args = append(args, offset)
+		}
 	}
 
 	rows, err := db.Query(query, args...)
