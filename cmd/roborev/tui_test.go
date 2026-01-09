@@ -1150,9 +1150,9 @@ func TestTUIFilterSelectRepo(t *testing.T) {
 	if m2.activeRepoFilter != "repo-a" {
 		t.Errorf("Expected activeRepoFilter='repo-a', got '%s'", m2.activeRepoFilter)
 	}
-	// Should select first visible job (ID=1 which is repo-a)
-	if m2.selectedIdx != 0 {
-		t.Errorf("Expected selectedIdx=0, got %d", m2.selectedIdx)
+	// Selection is invalidated until refetch completes (prevents race condition)
+	if m2.selectedIdx != -1 {
+		t.Errorf("Expected selectedIdx=-1 (invalidated pending refetch), got %d", m2.selectedIdx)
 	}
 }
 
@@ -1175,8 +1175,9 @@ func TestTUIFilterClearWithEsc(t *testing.T) {
 	if m2.activeRepoFilter != "" {
 		t.Errorf("Expected activeRepoFilter to be cleared, got '%s'", m2.activeRepoFilter)
 	}
-	if m2.selectedIdx != 0 {
-		t.Errorf("Expected selectedIdx=0, got %d", m2.selectedIdx)
+	// Selection is invalidated until refetch completes (prevents race condition)
+	if m2.selectedIdx != -1 {
+		t.Errorf("Expected selectedIdx=-1 (invalidated pending refetch), got %d", m2.selectedIdx)
 	}
 }
 
@@ -1416,9 +1417,9 @@ func TestTUIFilterToZeroVisibleJobs(t *testing.T) {
 	if cmd == nil {
 		t.Error("Expected fetchJobs command to be returned")
 	}
-	// Selection is reset to 0 pending the refetch
-	if m2.selectedIdx != 0 {
-		t.Errorf("Expected selectedIdx=0 pending refetch, got %d", m2.selectedIdx)
+	// Selection is invalidated until refetch completes (prevents race condition)
+	if m2.selectedIdx != -1 {
+		t.Errorf("Expected selectedIdx=-1 pending refetch, got %d", m2.selectedIdx)
 	}
 	if m2.selectedJobID != 0 {
 		t.Errorf("Expected selectedJobID=0 pending refetch, got %d", m2.selectedJobID)

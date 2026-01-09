@@ -1040,6 +1040,128 @@ func TestListReposWithReviewCounts(t *testing.T) {
 	})
 }
 
+func TestListJobsWithRepoFilter(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	// Create repos and jobs
+	repo1, err := db.GetOrCreateRepo("/tmp/repo1")
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+	repo2, err := db.GetOrCreateRepo("/tmp/repo2")
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+
+	// Add 3 jobs to repo1
+	for i := 0; i < 3; i++ {
+		sha := fmt.Sprintf("repo1-sha%d", i)
+		commit, err := db.GetOrCreateCommit(repo1.ID, sha, "Author", "Subject", time.Now())
+		if err != nil {
+			t.Fatalf("GetOrCreateCommit failed: %v", err)
+		}
+		if _, err := db.EnqueueJob(repo1.ID, commit.ID, sha, "codex"); err != nil {
+			t.Fatalf("EnqueueJob failed: %v", err)
+		}
+	}
+
+	// Add 2 jobs to repo2
+	for i := 0; i < 2; i++ {
+		sha := fmt.Sprintf("repo2-sha%d", i)
+		commit, err := db.GetOrCreateCommit(repo2.ID, sha, "Author", "Subject", time.Now())
+		if err != nil {
+			t.Fatalf("GetOrCreateCommit failed: %v", err)
+		}
+		if _, err := db.EnqueueJob(repo2.ID, commit.ID, sha, "codex"); err != nil {
+			t.Fatalf("EnqueueJob failed: %v", err)
+		}
+	}
+
+	t.Run("no filter returns all jobs", func(t *testing.T) {
+		jobs, err := db.ListJobs("", "", 50)
+		if err != nil {
+			t.Fatalf("ListJobs failed: %v", err)
+		}
+		if len(jobs) != 5 {
+			t.Errorf("Expected 5 jobs, got %d", len(jobs))
+		}
+	})
+
+	t.Run("repo filter returns only matching jobs", func(t *testing.T) {
+		jobs, err := db.ListJobs("", "repo1", 50)
+		if err != nil {
+			t.Fatalf("ListJobs failed: %v", err)
+		}
+		if len(jobs) != 3 {
+			t.Errorf("Expected 3 jobs for repo1, got %d", len(jobs))
+		}
+		for _, job := range jobs {
+			if job.RepoName != "repo1" {
+				t.Errorf("Expected RepoName 'repo1', got '%s'", job.RepoName)
+			}
+		}
+	})
+
+	t.Run("limit parameter works", func(t *testing.T) {
+		jobs, err := db.ListJobs("", "", 2)
+		if err != nil {
+			t.Fatalf("ListJobs failed: %v", err)
+		}
+		if len(jobs) != 2 {
+			t.Errorf("Expected 2 jobs with limit=2, got %d", len(jobs))
+		}
+	})
+
+	t.Run("limit=0 returns all jobs", func(t *testing.T) {
+		jobs, err := db.ListJobs("", "", 0)
+		if err != nil {
+			t.Fatalf("ListJobs failed: %v", err)
+		}
+		if len(jobs) != 5 {
+			t.Errorf("Expected 5 jobs with limit=0 (no limit), got %d", len(jobs))
+		}
+	})
+
+	t.Run("repo filter with limit", func(t *testing.T) {
+		jobs, err := db.ListJobs("", "repo1", 2)
+		if err != nil {
+			t.Fatalf("ListJobs failed: %v", err)
+		}
+		if len(jobs) != 2 {
+			t.Errorf("Expected 2 jobs with repo filter and limit=2, got %d", len(jobs))
+		}
+		for _, job := range jobs {
+			if job.RepoName != "repo1" {
+				t.Errorf("Expected RepoName 'repo1', got '%s'", job.RepoName)
+			}
+		}
+	})
+
+	t.Run("status and repo filter combined", func(t *testing.T) {
+		// Complete one job from repo1
+		claimed, err := db.ClaimJob("worker-1")
+		if err != nil {
+			t.Fatalf("ClaimJob failed: %v", err)
+		}
+		if err := db.CompleteJob(claimed.ID, "codex", "prompt", "output"); err != nil {
+			t.Fatalf("CompleteJob failed: %v", err)
+		}
+
+		// Query for done jobs in repo1
+		jobs, err := db.ListJobs("done", "repo1", 50)
+		if err != nil {
+			t.Fatalf("ListJobs failed: %v", err)
+		}
+		if len(jobs) != 1 {
+			t.Errorf("Expected 1 done job for repo1, got %d", len(jobs))
+		}
+		if len(jobs) > 0 && jobs[0].Status != JobStatusDone {
+			t.Errorf("Expected status 'done', got '%s'", jobs[0].Status)
+		}
+	})
+}
+
 func openTestDB(t *testing.T) *DB {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")

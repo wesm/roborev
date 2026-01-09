@@ -616,8 +616,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.activeRepoFilter = selected.name
 					m.currentView = tuiViewQueue
 					m.filterSearch = ""
-					// Reset selection - jobs will be refetched with new filter
-					m.selectedIdx = 0
+					// Invalidate selection until refetch completes - prevents
+					// actions on stale jobs list before new data arrives
+					m.selectedIdx = -1
 					m.selectedJobID = 0
 					// Refetch jobs with the new filter applied at the API level
 					return m, m.fetchJobs()
@@ -837,7 +838,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.currentView == tuiViewQueue && m.activeRepoFilter != "" {
 				// Clear filter and refetch all jobs
 				m.activeRepoFilter = ""
-				m.selectedIdx = 0
+				// Invalidate selection until refetch completes
+				m.selectedIdx = -1
 				m.selectedJobID = 0
 				return m, m.fetchJobs()
 			} else if m.currentView == tuiViewReview {

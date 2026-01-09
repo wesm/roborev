@@ -142,6 +142,178 @@ func TestHandleListRepos(t *testing.T) {
 	})
 }
 
+func TestHandleListJobsWithFilter(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open test DB: %v", err)
+	}
+	defer db.Close()
+
+	cfg := config.DefaultConfig()
+	server := NewServer(db, cfg)
+
+	// Create repos and jobs
+	repo1, err := db.GetOrCreateRepo(filepath.Join(tmpDir, "repo1"))
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+	repo2, err := db.GetOrCreateRepo(filepath.Join(tmpDir, "repo2"))
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+
+	// Add 3 jobs to repo1
+	for i := 0; i < 3; i++ {
+		sha := "repo1sha" + string(rune('a'+i))
+		commit, err := db.GetOrCreateCommit(repo1.ID, sha, "Author", "Subject", time.Now())
+		if err != nil {
+			t.Fatalf("GetOrCreateCommit failed: %v", err)
+		}
+		if _, err := db.EnqueueJob(repo1.ID, commit.ID, sha, "test"); err != nil {
+			t.Fatalf("EnqueueJob failed: %v", err)
+		}
+	}
+
+	// Add 2 jobs to repo2
+	for i := 0; i < 2; i++ {
+		sha := "repo2sha" + string(rune('a'+i))
+		commit, err := db.GetOrCreateCommit(repo2.ID, sha, "Author", "Subject", time.Now())
+		if err != nil {
+			t.Fatalf("GetOrCreateCommit failed: %v", err)
+		}
+		if _, err := db.EnqueueJob(repo2.ID, commit.ID, sha, "test"); err != nil {
+			t.Fatalf("EnqueueJob failed: %v", err)
+		}
+	}
+
+	t.Run("no filter returns all jobs", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var response struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+
+		if len(response.Jobs) != 5 {
+			t.Errorf("Expected 5 jobs, got %d", len(response.Jobs))
+		}
+	})
+
+	t.Run("repo filter returns only matching jobs", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs?repo=repo1", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var response struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+
+		if len(response.Jobs) != 3 {
+			t.Errorf("Expected 3 jobs for repo1, got %d", len(response.Jobs))
+		}
+
+		// Verify all jobs are from repo1
+		for _, job := range response.Jobs {
+			if job.RepoName != "repo1" {
+				t.Errorf("Expected RepoName 'repo1', got '%s'", job.RepoName)
+			}
+		}
+	})
+
+	t.Run("limit parameter works", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs?limit=2", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var response struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+
+		if len(response.Jobs) != 2 {
+			t.Errorf("Expected 2 jobs with limit=2, got %d", len(response.Jobs))
+		}
+	})
+
+	t.Run("limit=0 returns all jobs", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs?limit=0", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var response struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+
+		if len(response.Jobs) != 5 {
+			t.Errorf("Expected 5 jobs with limit=0 (no limit), got %d", len(response.Jobs))
+		}
+	})
+
+	t.Run("repo filter with limit", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs?repo=repo1&limit=2", nil)
+		w := httptest.NewRecorder()
+
+		server.handleListJobs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var response struct {
+			Jobs []storage.ReviewJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+
+		if len(response.Jobs) != 2 {
+			t.Errorf("Expected 2 jobs with repo filter and limit=2, got %d", len(response.Jobs))
+		}
+
+		// Verify all jobs are from repo1
+		for _, job := range response.Jobs {
+			if job.RepoName != "repo1" {
+				t.Errorf("Expected RepoName 'repo1', got '%s'", job.RepoName)
+			}
+		}
+	})
+}
+
 func TestHandleCancelJob(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
