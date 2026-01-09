@@ -521,4 +521,22 @@ func TestGenerateHookContent(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("baked path is absolute", func(t *testing.T) {
+		// os.Executable() returns absolute path; verify it's baked correctly
+		for _, line := range lines {
+			if strings.HasPrefix(line, "ROBOREV=") && !strings.Contains(line, "command -v") {
+				// Extract the path from ROBOREV="/path/here"
+				start := strings.Index(line, `"`)
+				end := strings.LastIndex(line, `"`)
+				if start != -1 && end > start {
+					path := line[start+1 : end]
+					if !filepath.IsAbs(path) {
+						t.Errorf("baked path should be absolute, got: %s", path)
+					}
+				}
+				break
+			}
+		}
+	})
 }

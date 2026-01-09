@@ -980,12 +980,22 @@ func shortRef(ref string) string {
 }
 
 // generateHookContent creates the post-commit hook script content.
-// It prefers the baked absolute path for security, falls back to PATH if missing.
+// It bakes the path to the currently running binary for consistency.
+// Falls back to PATH lookup if the baked path becomes unavailable.
 func generateHookContent() string {
-	// Get current roborev absolute path
-	roborevPath, err := exec.LookPath("roborev")
-	if err != nil {
-		roborevPath = "roborev"
+	// Get path to the currently running binary (not just first in PATH)
+	roborevPath, err := os.Executable()
+	if err == nil {
+		// Resolve symlinks to get the real path
+		if resolved, err := filepath.EvalSymlinks(roborevPath); err == nil {
+			roborevPath = resolved
+		}
+	} else {
+		// Fallback to PATH lookup if os.Executable fails (shouldn't happen)
+		roborevPath, _ = exec.LookPath("roborev")
+		if roborevPath == "" {
+			roborevPath = "roborev"
+		}
 	}
 
 	// Prefer baked path (security), fall back to PATH only if baked is missing
