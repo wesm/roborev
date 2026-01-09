@@ -248,7 +248,7 @@ func (db *DB) ListJobs(statusFilter string, repoFilter string, limit int) ([]Rev
 		args = append(args, statusFilter)
 	}
 	if repoFilter != "" {
-		conditions = append(conditions, "r.name = ?")
+		conditions = append(conditions, "r.root_path = ?")
 		args = append(args, repoFilter)
 	}
 

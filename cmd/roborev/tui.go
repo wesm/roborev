@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	neturl "net/url"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -52,8 +53,9 @@ const (
 
 // repoFilterItem represents a repo in the filter modal with its review count
 type repoFilterItem struct {
-	name  string // Empty string means "All repos"
-	count int
+	name     string // Display name (basename). Empty string means "All repos"
+	rootPath string // Unique identifier (full path). Empty for "All repos"
+	count    int
 }
 
 type tuiModel struct {
@@ -80,7 +82,7 @@ type tuiModel struct {
 	filterSearch      string           // Search/filter text typed by user
 
 	// Active filter (applied to queue view)
-	activeRepoFilter string // Empty = show all, otherwise repo name to filter by
+	activeRepoFilter string // Empty = show all, otherwise repo root_path to filter by
 }
 
 type tuiTickMsg time.Time
@@ -210,8 +212,9 @@ func (m tuiModel) fetchRepos() tea.Cmd {
 
 		var result struct {
 			Repos []struct {
-				Name  string `json:"name"`
-				Count int    `json:"count"`
+				Name     string `json:"name"`
+				RootPath string `json:"root_path"`
+				Count    int    `json:"count"`
 			} `json:"repos"`
 			TotalCount int `json:"total_count"`
 		}
@@ -222,7 +225,7 @@ func (m tuiModel) fetchRepos() tea.Cmd {
 		// Convert to repoFilterItem slice
 		repos := make([]repoFilterItem, len(result.Repos))
 		for i, r := range result.Repos {
-			repos[i] = repoFilterItem{name: r.Name, count: r.Count}
+			repos[i] = repoFilterItem{name: r.Name, rootPath: r.RootPath, count: r.Count}
 		}
 		return tuiReposMsg{repos: repos, totalCount: result.TotalCount}
 	}
@@ -509,28 +512,11 @@ func (m tuiModel) getVisibleJobs() []storage.ReviewJob {
 	}
 	var visible []storage.ReviewJob
 	for _, job := range m.jobs {
-		if job.RepoName == m.activeRepoFilter {
+		if job.RepoPath == m.activeRepoFilter {
 			visible = append(visible, job)
 		}
 	}
 	return visible
-}
-
-// findVisibleJobIndex finds the index in m.jobs for the nth visible job
-func (m tuiModel) findVisibleJobIndex(visibleIdx int) int {
-	if m.activeRepoFilter == "" {
-		return visibleIdx
-	}
-	count := 0
-	for i, job := range m.jobs {
-		if job.RepoName == m.activeRepoFilter {
-			if count == visibleIdx {
-				return i
-			}
-			count++
-		}
-	}
-	return -1
 }
 
 // getVisibleSelectedIdx returns the index within visible jobs for the current selection
@@ -544,7 +530,7 @@ func (m tuiModel) getVisibleSelectedIdx() int {
 	}
 	count := 0
 	for i, job := range m.jobs {
-		if job.RepoName == m.activeRepoFilter {
+		if job.RepoPath == m.activeRepoFilter {
 			if i == m.selectedIdx {
 				return count
 			}
@@ -558,7 +544,7 @@ func (m tuiModel) getVisibleSelectedIdx() int {
 // Returns -1 if no next visible job exists
 func (m tuiModel) findNextVisibleJob(currentIdx int) int {
 	for i := currentIdx + 1; i < len(m.jobs); i++ {
-		if m.activeRepoFilter == "" || m.jobs[i].RepoName == m.activeRepoFilter {
+		if m.activeRepoFilter == "" || m.jobs[i].RepoPath == m.activeRepoFilter {
 			return i
 		}
 	}
@@ -569,7 +555,7 @@ func (m tuiModel) findNextVisibleJob(currentIdx int) int {
 // Returns -1 if no previous visible job exists
 func (m tuiModel) findPrevVisibleJob(currentIdx int) int {
 	for i := currentIdx - 1; i >= 0; i-- {
-		if m.activeRepoFilter == "" || m.jobs[i].RepoName == m.activeRepoFilter {
+		if m.activeRepoFilter == "" || m.jobs[i].RepoPath == m.activeRepoFilter {
 			return i
 		}
 	}
@@ -579,7 +565,7 @@ func (m tuiModel) findPrevVisibleJob(currentIdx int) int {
 // findFirstVisibleJob finds the first job index that matches the filter
 func (m tuiModel) findFirstVisibleJob() int {
 	for i, job := range m.jobs {
-		if m.activeRepoFilter == "" || job.RepoName == m.activeRepoFilter {
+		if m.activeRepoFilter == "" || job.RepoPath == m.activeRepoFilter {
 			return i
 		}
 	}
@@ -589,7 +575,7 @@ func (m tuiModel) findFirstVisibleJob() int {
 // findLastVisibleJob finds the last job index that matches the filter
 func (m tuiModel) findLastVisibleJob() int {
 	for i := len(m.jobs) - 1; i >= 0; i-- {
-		if m.activeRepoFilter == "" || m.jobs[i].RepoName == m.activeRepoFilter {
+		if m.activeRepoFilter == "" || m.jobs[i].RepoPath == m.activeRepoFilter {
 			return i
 		}
 	}
@@ -617,7 +603,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				selected := m.getSelectedFilterRepo()
 				if selected != nil {
-					m.activeRepoFilter = selected.name
+					m.activeRepoFilter = selected.rootPath
 					m.currentView = tuiViewQueue
 					m.filterSearch = ""
 					// Invalidate selection until refetch completes - prevents
@@ -906,7 +892,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.activeRepoFilter != "" {
 				// Job exists but check if it matches the filter
-				if m.jobs[m.selectedIdx].RepoName != m.activeRepoFilter {
+				if m.jobs[m.selectedIdx].RepoPath != m.activeRepoFilter {
 					// Selected job doesn't match filter, select first visible
 					firstVisible := m.findFirstVisibleJob()
 					if firstVisible >= 0 {
@@ -991,7 +977,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Pre-select current filter if active
 		if m.activeRepoFilter != "" {
 			for i, r := range m.filterRepos {
-				if r.name == m.activeRepoFilter {
+				if r.rootPath == m.activeRepoFilter {
 					m.filterSelectedIdx = i
 					break
 				}
@@ -1024,7 +1010,7 @@ func (m tuiModel) renderQueueView() string {
 	// Title with version, optional update notification, and filter indicator
 	title := fmt.Sprintf("RoboRev Queue (%s)", version.Version)
 	if m.activeRepoFilter != "" {
-		title += fmt.Sprintf(" [f: %s]", m.activeRepoFilter)
+		title += fmt.Sprintf(" [f: %s]", filepath.Base(m.activeRepoFilter))
 	}
 	b.WriteString(tuiTitleStyle.Render(title))
 	b.WriteString("\n")

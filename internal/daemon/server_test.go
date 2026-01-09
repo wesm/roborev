@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -212,7 +213,8 @@ func TestHandleListJobsWithFilter(t *testing.T) {
 	})
 
 	t.Run("repo filter returns only matching jobs", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/jobs?repo=repo1", nil)
+		// Filter by root_path (not name) since repos with same name could exist at different paths
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs?repo="+url.QueryEscape(repo1.RootPath), nil)
 		w := httptest.NewRecorder()
 
 		server.handleListJobs(w, req)
@@ -285,7 +287,7 @@ func TestHandleListJobsWithFilter(t *testing.T) {
 	})
 
 	t.Run("repo filter with limit", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/jobs?repo=repo1&limit=2", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/jobs?repo="+url.QueryEscape(repo1.RootPath)+"&limit=2", nil)
 		w := httptest.NewRecorder()
 
 		server.handleListJobs(w, req)

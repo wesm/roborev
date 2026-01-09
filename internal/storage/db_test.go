@@ -1091,7 +1091,8 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 	})
 
 	t.Run("repo filter returns only matching jobs", func(t *testing.T) {
-		jobs, err := db.ListJobs("", "repo1", 50)
+		// Filter by root_path (not name) since repos with same name could exist at different paths
+		jobs, err := db.ListJobs("", repo1.RootPath, 50)
 		if err != nil {
 			t.Fatalf("ListJobs failed: %v", err)
 		}
@@ -1126,7 +1127,7 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 	})
 
 	t.Run("repo filter with limit", func(t *testing.T) {
-		jobs, err := db.ListJobs("", "repo1", 2)
+		jobs, err := db.ListJobs("", repo1.RootPath, 2)
 		if err != nil {
 			t.Fatalf("ListJobs failed: %v", err)
 		}
@@ -1151,7 +1152,7 @@ func TestListJobsWithRepoFilter(t *testing.T) {
 		}
 
 		// Query for done jobs in repo1
-		jobs, err := db.ListJobs("done", "repo1", 50)
+		jobs, err := db.ListJobs("done", repo1.RootPath, 50)
 		if err != nil {
 			t.Fatalf("ListJobs failed: %v", err)
 		}

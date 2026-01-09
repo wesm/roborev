@@ -63,18 +63,19 @@ func (db *DB) GetRepoByPath(rootPath string) (*Repo, error) {
 
 // RepoWithCount represents a repo with its total job count
 type RepoWithCount struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
+	Name     string `json:"name"`
+	RootPath string `json:"root_path"`
+	Count    int    `json:"count"`
 }
 
 // ListReposWithReviewCounts returns all repos with their total job counts
 func (db *DB) ListReposWithReviewCounts() ([]RepoWithCount, int, error) {
 	// Query repos with their job counts (includes queued/running, not just completed reviews)
 	rows, err := db.Query(`
-		SELECT r.name, COUNT(rj.id) as job_count
+		SELECT r.name, r.root_path, COUNT(rj.id) as job_count
 		FROM repos r
 		LEFT JOIN review_jobs rj ON rj.repo_id = r.id
-		GROUP BY r.id, r.name
+		GROUP BY r.id, r.name, r.root_path
 		ORDER BY r.name
 	`)
 	if err != nil {
@@ -86,7 +87,7 @@ func (db *DB) ListReposWithReviewCounts() ([]RepoWithCount, int, error) {
 	totalCount := 0
 	for rows.Next() {
 		var rc RepoWithCount
-		if err := rows.Scan(&rc.Name, &rc.Count); err != nil {
+		if err := rows.Scan(&rc.Name, &rc.RootPath, &rc.Count); err != nil {
 			return nil, 0, err
 		}
 		repos = append(repos, rc)
