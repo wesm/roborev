@@ -254,7 +254,7 @@ func initCmd() *cobra.Command {
 				}
 			}
 
-				// 4. Install post-commit hook
+			// 4. Install post-commit hook
 			hooksDir, err := git.GetHooksPath(root)
 			if err != nil {
 				return fmt.Errorf("get hooks path: %w", err)
