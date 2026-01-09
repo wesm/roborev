@@ -1350,7 +1350,31 @@ func (m tuiModel) renderFilterView() string {
 	b.WriteString("\n\n")
 
 	visible := m.getVisibleFilterRepos()
-	for i, repo := range visible {
+
+	// Calculate visible rows (reserve lines for: title(2) + search(2) + help(2))
+	reservedLines := 6
+	visibleRows := m.height - reservedLines
+	if visibleRows < 3 {
+		visibleRows = 3
+	}
+
+	// Determine which repos to show, keeping selected item visible
+	start := 0
+	end := len(visible)
+	if len(visible) > visibleRows {
+		start = m.filterSelectedIdx - visibleRows/2
+		if start < 0 {
+			start = 0
+		}
+		end = start + visibleRows
+		if end > len(visible) {
+			end = len(visible)
+			start = end - visibleRows
+		}
+	}
+
+	for i := start; i < end; i++ {
+		repo := visible[i]
 		var line string
 		if repo.name == "" {
 			line = fmt.Sprintf("All repos (%d)", repo.count)
@@ -1368,6 +1392,10 @@ func (m tuiModel) renderFilterView() string {
 
 	if len(visible) == 0 {
 		b.WriteString(tuiStatusStyle.Render("  No matching repos"))
+		b.WriteString("\n")
+	} else if len(visible) > visibleRows {
+		scrollInfo := fmt.Sprintf("[showing %d-%d of %d]", start+1, end, len(visible))
+		b.WriteString(tuiStatusStyle.Render(scrollInfo))
 		b.WriteString("\n")
 	}
 
