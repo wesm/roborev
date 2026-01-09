@@ -119,8 +119,8 @@ roborev auto-detects installed agents and falls back in order: codex → claude-
 
 The interactive terminal UI (`roborev tui`) provides a real-time view of the review queue.
 
-![Filter Modal](docs/screenshots/tui-filter.png)
-![Review View](docs/screenshots/tui-review.png)
+<img src="docs/screenshots/tui-filter.png" width="75%" alt="Filter Modal">
+<img src="docs/screenshots/tui-review.png" width="75%" alt="Review View">
 
 **Queue View:**
 
