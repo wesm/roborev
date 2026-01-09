@@ -2256,9 +2256,11 @@ func TestTUICalculateColumnWidthsProportions(t *testing.T) {
 
 func TestTUIRenderJobLineTruncation(t *testing.T) {
 	m := tuiModel{width: 80}
+	// Use a git range - shortRef truncates ranges to 17 chars max, then renderJobLine
+	// truncates further based on colWidths.ref. Use a range longer than 17 chars.
 	job := storage.ReviewJob{
 		ID:         1,
-		GitRef:     "abcdef1234567890abcdef1234567890abcdef12", // 40 char SHA
+		GitRef:     "abcdef1234567..ghijkl7890123", // 28 char range, shortRef -> 17 chars
 		RepoName:   "very-long-repository-name-that-exceeds-width",
 		Agent:      "super-long-agent-name",
 		Status:     storage.JobStatusDone,
@@ -2266,8 +2268,9 @@ func TestTUIRenderJobLineTruncation(t *testing.T) {
 	}
 
 	// Use narrow column widths to force truncation
+	// ref=10 will truncate the 17-char shortRef output
 	colWidths := columnWidths{
-		ref:   15,
+		ref:   10,
 		repo:  15,
 		agent: 10,
 	}
@@ -2280,14 +2283,55 @@ func TestTUIRenderJobLineTruncation(t *testing.T) {
 	}
 
 	// The line should contain truncated versions, not full strings
-	if strings.Contains(line, "abcdef1234567890abcdef1234567890abcdef12") {
-		t.Error("Full git ref should have been truncated")
+	// shortRef reduces "abcdef1234567..ghijkl7890123" to "abcdef1234567..gh" (17 chars)
+	// then renderJobLine truncates to colWidths.ref (10)
+	if strings.Contains(line, "abcdef1234567..gh") {
+		t.Error("Full git ref (after shortRef) should have been truncated")
 	}
 	if strings.Contains(line, "very-long-repository-name-that-exceeds-width") {
 		t.Error("Full repo name should have been truncated")
 	}
 	if strings.Contains(line, "super-long-agent-name") {
 		t.Error("Full agent name should have been truncated")
+	}
+}
+
+func TestTUIRenderJobLineLength(t *testing.T) {
+	// Test that rendered line length respects column widths
+	m := tuiModel{width: 100}
+	job := storage.ReviewJob{
+		ID:         123,
+		GitRef:     "abc1234..def5678901234567890", // Long range
+		RepoName:   "my-very-long-repository-name-here",
+		Agent:      "claude-code-agent",
+		Status:     storage.JobStatusDone,
+		EnqueuedAt: time.Now(),
+	}
+
+	idWidth := 4
+	colWidths := columnWidths{
+		ref:   12,
+		repo:  15,
+		agent: 10,
+	}
+
+	line := m.renderJobLine(job, false, idWidth, colWidths)
+
+	// Fixed widths: ID (idWidth=4), Status (10), Queued (12), Elapsed (8), Addr'd (varies)
+	// Plus spacing between columns
+	// The line should not be excessively long
+	// Note: line includes ANSI codes for status styling, so we check a reasonable max
+	maxExpectedLen := idWidth + colWidths.ref + colWidths.repo + colWidths.agent + 10 + 12 + 8 + 10 + 20 // generous margin for spacing and ANSI
+	if len(line) > maxExpectedLen {
+		t.Errorf("Line length %d exceeds expected max %d: %s", len(line), maxExpectedLen, line)
+	}
+
+	// Verify truncation happened - original values should not appear
+	if strings.Contains(line, "my-very-long-repository-name-here") {
+		t.Error("Repo name should have been truncated")
+	}
+	if strings.Contains(line, "claude-code-agent") {
+		t.Error("Agent name should have been truncated")
 	}
 }
 
