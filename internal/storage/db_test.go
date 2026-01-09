@@ -207,7 +207,9 @@ func TestReviewOperations(t *testing.T) {
 	if _, err := db.ClaimJob("worker-1"); err != nil {
 		t.Fatalf("ClaimJob failed: %v", err)
 	}
-	db.CompleteJob(job.ID, "codex", "the prompt", "the review output")
+	if err := db.CompleteJob(job.ID, "codex", "the prompt", "the review output"); err != nil {
+		t.Fatalf("CompleteJob failed: %v", err)
+	}
 
 	// Get review by commit SHA
 	review, err := db.GetReviewByCommitSHA("rev123")
