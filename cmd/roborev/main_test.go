@@ -453,3 +453,52 @@ func TestInstallHookCmdCreatesHooksDirectory(t *testing.T) {
 		t.Error("post-commit hook was not created")
 	}
 }
+
+func TestGenerateHookContent(t *testing.T) {
+	content := generateHookContent()
+
+	t.Run("has shebang", func(t *testing.T) {
+		if !strings.HasPrefix(content, "#!/bin/sh\n") {
+			t.Error("hook should start with #!/bin/sh")
+		}
+	})
+
+	t.Run("has roborev comment", func(t *testing.T) {
+		if !strings.Contains(content, "# RoboRev") {
+			t.Error("hook should contain RoboRev comment for detection")
+		}
+	})
+
+	t.Run("prefers PATH lookup", func(t *testing.T) {
+		// Should try command -v first (for upgrades)
+		if !strings.Contains(content, "$(command -v roborev") {
+			t.Error("hook should prefer PATH lookup via 'command -v roborev'")
+		}
+	})
+
+	t.Run("has fallback path", func(t *testing.T) {
+		// Should have a fallback ROBOREV= assignment
+		if !strings.Contains(content, "ROBOREV=") {
+			t.Error("hook should have fallback ROBOREV path")
+		}
+	})
+
+	t.Run("runs enqueue with quiet flag", func(t *testing.T) {
+		if !strings.Contains(content, "enqueue --quiet") {
+			t.Error("hook should run 'enqueue --quiet'")
+		}
+	})
+
+	t.Run("redirects stderr", func(t *testing.T) {
+		// Should silence stderr for truly quiet operation
+		if !strings.Contains(content, "2>/dev/null") {
+			t.Error("hook should redirect stderr to /dev/null")
+		}
+	})
+
+	t.Run("runs in background", func(t *testing.T) {
+		if !strings.Contains(content, "&\n") {
+			t.Error("hook should run command in background with &")
+		}
+	})
+}
