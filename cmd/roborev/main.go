@@ -267,9 +267,14 @@ func initCmd() *cobra.Command {
 				roborevPath = "roborev" // Fallback to PATH lookup
 			}
 
+			// Create hook with proper quoting and fallback for moved/upgraded binaries
 			hookContent := fmt.Sprintf(`#!/bin/sh
 # RoboRev post-commit hook - auto-reviews every commit
-%s enqueue --quiet &
+ROBOREV=%q
+if [ ! -x "$ROBOREV" ]; then
+    ROBOREV=$(command -v roborev) || exit 0
+fi
+"$ROBOREV" enqueue --quiet &
 `, roborevPath)
 
 			// Ensure hooks directory exists
@@ -753,9 +758,14 @@ func installHookCmd() *cobra.Command {
 				roborevPath = "roborev" // Fallback to PATH lookup
 			}
 
+			// Create hook with proper quoting and fallback for moved/upgraded binaries
 			hookContent := fmt.Sprintf(`#!/bin/sh
 # RoboRev post-commit hook - auto-reviews every commit
-%s enqueue --quiet &
+ROBOREV=%q
+if [ ! -x "$ROBOREV" ]; then
+    ROBOREV=$(command -v roborev) || exit 0
+fi
+"$ROBOREV" enqueue --quiet &
 `, roborevPath)
 
 			if err := os.WriteFile(hookPath, []byte(hookContent), 0755); err != nil {
