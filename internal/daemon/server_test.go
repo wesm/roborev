@@ -156,9 +156,18 @@ func TestHandleCancelJob(t *testing.T) {
 	server := NewServer(db, cfg)
 
 	// Create a repo and job
-	repo, _ := db.GetOrCreateRepo(tmpDir)
-	commit, _ := db.GetOrCreateCommit(repo.ID, "canceltest", "Author", "Subject", time.Now())
-	job, _ := db.EnqueueJob(repo.ID, commit.ID, "canceltest", "test")
+	repo, err := db.GetOrCreateRepo(tmpDir)
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+	commit, err := db.GetOrCreateCommit(repo.ID, "canceltest", "Author", "Subject", time.Now())
+	if err != nil {
+		t.Fatalf("GetOrCreateCommit failed: %v", err)
+	}
+	job, err := db.EnqueueJob(repo.ID, commit.ID, "canceltest", "test")
+	if err != nil {
+		t.Fatalf("EnqueueJob failed: %v", err)
+	}
 
 	t.Run("cancel queued job", func(t *testing.T) {
 		reqBody, _ := json.Marshal(CancelJobRequest{JobID: job.ID})
@@ -171,7 +180,10 @@ func TestHandleCancelJob(t *testing.T) {
 			t.Errorf("Expected status 200, got %d: %s", w.Code, w.Body.String())
 		}
 
-		updated, _ := db.GetJobByID(job.ID)
+		updated, err := db.GetJobByID(job.ID)
+		if err != nil {
+			t.Fatalf("GetJobByID failed: %v", err)
+		}
 		if updated.Status != storage.JobStatusCanceled {
 			t.Errorf("Expected status 'canceled', got '%s'", updated.Status)
 		}
@@ -227,9 +239,17 @@ func TestHandleCancelJob(t *testing.T) {
 
 	t.Run("cancel running job", func(t *testing.T) {
 		// Create a new job and claim it
-		commit2, _ := db.GetOrCreateCommit(repo.ID, "cancelrunning", "Author", "Subject", time.Now())
-		job2, _ := db.EnqueueJob(repo.ID, commit2.ID, "cancelrunning", "test")
-		db.ClaimJob("worker-1")
+		commit2, err := db.GetOrCreateCommit(repo.ID, "cancelrunning", "Author", "Subject", time.Now())
+		if err != nil {
+			t.Fatalf("GetOrCreateCommit failed: %v", err)
+		}
+		job2, err := db.EnqueueJob(repo.ID, commit2.ID, "cancelrunning", "test")
+		if err != nil {
+			t.Fatalf("EnqueueJob failed: %v", err)
+		}
+		if _, err := db.ClaimJob("worker-1"); err != nil {
+			t.Fatalf("ClaimJob failed: %v", err)
+		}
 
 		reqBody, _ := json.Marshal(CancelJobRequest{JobID: job2.ID})
 		req := httptest.NewRequest(http.MethodPost, "/api/job/cancel", bytes.NewReader(reqBody))
@@ -241,7 +261,10 @@ func TestHandleCancelJob(t *testing.T) {
 			t.Errorf("Expected status 200, got %d: %s", w.Code, w.Body.String())
 		}
 
-		updated, _ := db.GetJobByID(job2.ID)
+		updated, err := db.GetJobByID(job2.ID)
+		if err != nil {
+			t.Fatalf("GetJobByID failed: %v", err)
+		}
 		if updated.Status != storage.JobStatusCanceled {
 			t.Errorf("Expected status 'canceled', got '%s'", updated.Status)
 		}

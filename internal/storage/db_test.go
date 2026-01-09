@@ -58,7 +58,10 @@ func TestCommitOperations(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	repo, _ := db.GetOrCreateRepo("/tmp/test-repo")
+	repo, err := db.GetOrCreateRepo("/tmp/test-repo")
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
 
 	// Create commit
 	commit, err := db.GetOrCreateCommit(repo.ID, "abc123def456", "Test Author", "Test commit", time.Now())
@@ -87,8 +90,14 @@ func TestJobLifecycle(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	repo, _ := db.GetOrCreateRepo("/tmp/test-repo")
-	commit, _ := db.GetOrCreateCommit(repo.ID, "abc123", "Author", "Subject", time.Now())
+	repo, err := db.GetOrCreateRepo("/tmp/test-repo")
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+	commit, err := db.GetOrCreateCommit(repo.ID, "abc123", "Author", "Subject", time.Now())
+	if err != nil {
+		t.Fatalf("GetOrCreateCommit failed: %v", err)
+	}
 
 	// Enqueue job
 	job, err := db.EnqueueJob(repo.ID, commit.ID, "abc123", "codex")
@@ -144,19 +153,33 @@ func TestJobFailure(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	repo, _ := db.GetOrCreateRepo("/tmp/test-repo")
-	commit, _ := db.GetOrCreateCommit(repo.ID, "def456", "Author", "Subject", time.Now())
+	repo, err := db.GetOrCreateRepo("/tmp/test-repo")
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+	commit, err := db.GetOrCreateCommit(repo.ID, "def456", "Author", "Subject", time.Now())
+	if err != nil {
+		t.Fatalf("GetOrCreateCommit failed: %v", err)
+	}
 
-	job, _ := db.EnqueueJob(repo.ID, commit.ID, "def456", "codex")
-	db.ClaimJob("worker-1")
+	job, err := db.EnqueueJob(repo.ID, commit.ID, "def456", "codex")
+	if err != nil {
+		t.Fatalf("EnqueueJob failed: %v", err)
+	}
+	if _, err := db.ClaimJob("worker-1"); err != nil {
+		t.Fatalf("ClaimJob failed: %v", err)
+	}
 
 	// Fail the job
-	err := db.FailJob(job.ID, "test error message")
+	err = db.FailJob(job.ID, "test error message")
 	if err != nil {
 		t.Fatalf("FailJob failed: %v", err)
 	}
 
-	updatedJob, _ := db.GetJobByID(job.ID)
+	updatedJob, err := db.GetJobByID(job.ID)
+	if err != nil {
+		t.Fatalf("GetJobByID failed: %v", err)
+	}
 	if updatedJob.Status != JobStatusFailed {
 		t.Errorf("Expected status 'failed', got '%s'", updatedJob.Status)
 	}
@@ -169,10 +192,21 @@ func TestReviewOperations(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	repo, _ := db.GetOrCreateRepo("/tmp/test-repo")
-	commit, _ := db.GetOrCreateCommit(repo.ID, "rev123", "Author", "Subject", time.Now())
-	job, _ := db.EnqueueJob(repo.ID, commit.ID, "rev123", "codex")
-	db.ClaimJob("worker-1")
+	repo, err := db.GetOrCreateRepo("/tmp/test-repo")
+	if err != nil {
+		t.Fatalf("GetOrCreateRepo failed: %v", err)
+	}
+	commit, err := db.GetOrCreateCommit(repo.ID, "rev123", "Author", "Subject", time.Now())
+	if err != nil {
+		t.Fatalf("GetOrCreateCommit failed: %v", err)
+	}
+	job, err := db.EnqueueJob(repo.ID, commit.ID, "rev123", "codex")
+	if err != nil {
+		t.Fatalf("EnqueueJob failed: %v", err)
+	}
+	if _, err := db.ClaimJob("worker-1"); err != nil {
+		t.Fatalf("ClaimJob failed: %v", err)
+	}
 	db.CompleteJob(job.ID, "codex", "the prompt", "the review output")
 
 	// Get review by commit SHA
