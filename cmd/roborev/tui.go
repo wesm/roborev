@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
-	"github.com/wesm/roborev/internal/daemon"
 	"github.com/wesm/roborev/internal/storage"
 	"github.com/wesm/roborev/internal/update"
 	"github.com/wesm/roborev/internal/version"
@@ -21,8 +21,7 @@ import (
 var (
 	tuiTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("205")).
-			MarginBottom(1)
+			Foreground(lipgloss.Color("205"))
 
 	tuiStatusStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241"))
@@ -38,8 +37,7 @@ var (
 	tuiCanceledStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // Orange
 
 	tuiHelpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			MarginTop(1)
+			Foreground(lipgloss.Color("241"))
 )
 
 type tuiView int
@@ -48,12 +46,18 @@ const (
 	tuiViewQueue tuiView = iota
 	tuiViewReview
 	tuiViewPrompt
+	tuiViewFilter
 )
 
+// repoFilterItem represents a repo in the filter modal with its review count
+type repoFilterItem struct {
+	name  string // Empty string means "All repos"
+	count int
+}
+
 type tuiModel struct {
-	serverAddr      string
-	daemonVersion   string
-	client          *http.Client
+	serverAddr string
+	client     *http.Client
 	jobs            []storage.ReviewJob
 	status          storage.DaemonStatus
 	selectedIdx     int
@@ -67,6 +71,14 @@ type tuiModel struct {
 	height          int
 	err             error
 	updateAvailable string // Latest version if update available, empty if up to date
+
+	// Filter modal state
+	filterRepos       []repoFilterItem // Available repos with counts
+	filterSelectedIdx int              // Currently highlighted repo in filter list
+	filterSearch      string           // Search/filter text typed by user
+
+	// Active filter (applied to queue view)
+	activeRepoFilter string // Empty = show all, otherwise repo name to filter by
 }
 
 type tuiTickMsg time.Time
@@ -90,22 +102,19 @@ type tuiCancelResultMsg struct {
 }
 type tuiErrMsg error
 type tuiUpdateCheckMsg string // Latest version if available, empty if up to date
+type tuiReposMsg struct {
+	repos      []repoFilterItem
+	totalCount int
+}
 
 func newTuiModel(serverAddr string) tuiModel {
-	// Get daemon version from runtime info
-	daemonVersion := "unknown"
-	if info, err := daemon.ReadRuntime(); err == nil {
-		daemonVersion = info.Version
-	}
-
 	return tuiModel{
-		serverAddr:    serverAddr,
-		daemonVersion: daemonVersion,
-		client:        &http.Client{Timeout: 10 * time.Second},
-		jobs:          []storage.ReviewJob{},
-		currentView:   tuiViewQueue,
-		width:         80, // sensible defaults until we get WindowSizeMsg
-		height:        24,
+		serverAddr:  serverAddr,
+		client:      &http.Client{Timeout: 10 * time.Second},
+		jobs:        []storage.ReviewJob{},
+		currentView: tuiViewQueue,
+		width:       80, // sensible defaults until we get WindowSizeMsg
+		height:      24,
 	}
 }
 
@@ -174,6 +183,38 @@ func (m tuiModel) checkForUpdate() tea.Cmd {
 			return tuiUpdateCheckMsg("") // No update or error
 		}
 		return tuiUpdateCheckMsg(info.LatestVersion)
+	}
+}
+
+func (m tuiModel) fetchRepos() tea.Cmd {
+	return func() tea.Msg {
+		resp, err := m.client.Get(m.serverAddr + "/api/repos")
+		if err != nil {
+			return tuiErrMsg(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return tuiErrMsg(fmt.Errorf("fetch repos: %s", resp.Status))
+		}
+
+		var result struct {
+			Repos []struct {
+				Name  string `json:"name"`
+				Count int    `json:"count"`
+			} `json:"repos"`
+			TotalCount int `json:"total_count"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return tuiErrMsg(err)
+		}
+
+		// Convert to repoFilterItem slice
+		repos := make([]repoFilterItem, len(result.Repos))
+		for i, r := range result.Repos {
+			repos[i] = repoFilterItem{name: r.Name, count: r.Count}
+		}
+		return tuiReposMsg{repos: repos, totalCount: result.TotalCount}
 	}
 }
 
@@ -411,9 +452,188 @@ func (m tuiModel) cancelJob(jobID int64, oldStatus storage.JobStatus, oldFinishe
 	}
 }
 
+// getVisibleFilterRepos returns repos that match the current search filter
+func (m *tuiModel) getVisibleFilterRepos() []repoFilterItem {
+	if m.filterSearch == "" {
+		return m.filterRepos
+	}
+	search := strings.ToLower(m.filterSearch)
+	var visible []repoFilterItem
+	for _, r := range m.filterRepos {
+		// Always include "All repos" option, filter others by search
+		if r.name == "" || strings.Contains(strings.ToLower(r.name), search) {
+			visible = append(visible, r)
+		}
+	}
+	return visible
+}
+
+// filterNavigateUp moves selection up in the filter modal
+func (m *tuiModel) filterNavigateUp() {
+	if m.filterSelectedIdx > 0 {
+		m.filterSelectedIdx--
+	}
+}
+
+// filterNavigateDown moves selection down in the filter modal
+func (m *tuiModel) filterNavigateDown() {
+	visible := m.getVisibleFilterRepos()
+	if m.filterSelectedIdx < len(visible)-1 {
+		m.filterSelectedIdx++
+	}
+}
+
+// getSelectedFilterRepo returns the currently selected repo in the filter modal
+func (m *tuiModel) getSelectedFilterRepo() *repoFilterItem {
+	visible := m.getVisibleFilterRepos()
+	if m.filterSelectedIdx >= 0 && m.filterSelectedIdx < len(visible) {
+		return &visible[m.filterSelectedIdx]
+	}
+	return nil
+}
+
+// getVisibleJobs returns jobs filtered by the active repo filter
+func (m tuiModel) getVisibleJobs() []storage.ReviewJob {
+	if m.activeRepoFilter == "" {
+		return m.jobs
+	}
+	var visible []storage.ReviewJob
+	for _, job := range m.jobs {
+		if job.RepoName == m.activeRepoFilter {
+			visible = append(visible, job)
+		}
+	}
+	return visible
+}
+
+// findVisibleJobIndex finds the index in m.jobs for the nth visible job
+func (m tuiModel) findVisibleJobIndex(visibleIdx int) int {
+	if m.activeRepoFilter == "" {
+		return visibleIdx
+	}
+	count := 0
+	for i, job := range m.jobs {
+		if job.RepoName == m.activeRepoFilter {
+			if count == visibleIdx {
+				return i
+			}
+			count++
+		}
+	}
+	return -1
+}
+
+// getVisibleSelectedIdx returns the index within visible jobs for the current selection
+func (m tuiModel) getVisibleSelectedIdx() int {
+	if m.activeRepoFilter == "" {
+		return m.selectedIdx
+	}
+	count := 0
+	for i, job := range m.jobs {
+		if job.RepoName == m.activeRepoFilter {
+			if i == m.selectedIdx {
+				return count
+			}
+			count++
+		}
+	}
+	return 0
+}
+
+// findNextVisibleJob finds the next job index in m.jobs that matches the filter
+// Returns -1 if no next visible job exists
+func (m tuiModel) findNextVisibleJob(currentIdx int) int {
+	for i := currentIdx + 1; i < len(m.jobs); i++ {
+		if m.activeRepoFilter == "" || m.jobs[i].RepoName == m.activeRepoFilter {
+			return i
+		}
+	}
+	return -1
+}
+
+// findPrevVisibleJob finds the previous job index in m.jobs that matches the filter
+// Returns -1 if no previous visible job exists
+func (m tuiModel) findPrevVisibleJob(currentIdx int) int {
+	for i := currentIdx - 1; i >= 0; i-- {
+		if m.activeRepoFilter == "" || m.jobs[i].RepoName == m.activeRepoFilter {
+			return i
+		}
+	}
+	return -1
+}
+
+// findFirstVisibleJob finds the first job index that matches the filter
+func (m tuiModel) findFirstVisibleJob() int {
+	for i, job := range m.jobs {
+		if m.activeRepoFilter == "" || job.RepoName == m.activeRepoFilter {
+			return i
+		}
+	}
+	return -1
+}
+
+// findLastVisibleJob finds the last job index that matches the filter
+func (m tuiModel) findLastVisibleJob() int {
+	for i := len(m.jobs) - 1; i >= 0; i-- {
+		if m.activeRepoFilter == "" || m.jobs[i].RepoName == m.activeRepoFilter {
+			return i
+		}
+	}
+	return -1
+}
+
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle filter view first (it captures most keys for typing)
+		if m.currentView == tuiViewFilter {
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc", "q":
+				m.currentView = tuiViewQueue
+				m.filterSearch = ""
+				return m, nil
+			case "up", "k":
+				m.filterNavigateUp()
+				return m, nil
+			case "down", "j":
+				m.filterNavigateDown()
+				return m, nil
+			case "enter":
+				selected := m.getSelectedFilterRepo()
+				if selected != nil {
+					m.activeRepoFilter = selected.name
+					m.currentView = tuiViewQueue
+					m.filterSearch = ""
+					// Reset selection to first visible job
+					visibleJobs := m.getVisibleJobs()
+					if len(visibleJobs) > 0 {
+						m.selectedIdx = m.findVisibleJobIndex(0)
+						m.selectedJobID = visibleJobs[0].ID
+					}
+				}
+				return m, nil
+			case "backspace":
+				if len(m.filterSearch) > 0 {
+					m.filterSearch = m.filterSearch[:len(m.filterSearch)-1]
+					m.filterSelectedIdx = 0 // Reset selection when search changes
+				}
+				return m, nil
+			default:
+				// Handle typing for search
+				key := msg.String()
+				if len(key) == 1 {
+					r := rune(key[0])
+					if unicode.IsPrint(r) && !unicode.IsControl(r) {
+						m.filterSearch += key
+						m.filterSelectedIdx = 0 // Reset selection when search changes
+					}
+				}
+				return m, nil
+			}
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			if m.currentView == tuiViewReview {
@@ -438,8 +658,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "up", "k":
 			if m.currentView == tuiViewQueue {
-				if m.selectedIdx > 0 {
-					m.selectedIdx--
+				// Navigate to previous visible job (respects filter)
+				prevIdx := m.findPrevVisibleJob(m.selectedIdx)
+				if prevIdx >= 0 {
+					m.selectedIdx = prevIdx
 					m.updateSelectedJobID()
 				}
 			} else if m.currentView == tuiViewReview {
@@ -454,8 +676,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "down", "j":
 			if m.currentView == tuiViewQueue {
-				if m.selectedIdx < len(m.jobs)-1 {
-					m.selectedIdx++
+				// Navigate to next visible job (respects filter)
+				nextIdx := m.findNextVisibleJob(m.selectedIdx)
+				if nextIdx >= 0 {
+					m.selectedIdx = nextIdx
 					m.updateSelectedJobID()
 				}
 			} else if m.currentView == tuiViewReview {
@@ -467,10 +691,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgup":
 			pageSize := max(1, m.height-10)
 			if m.currentView == tuiViewQueue {
-				if len(m.jobs) > 0 {
-					m.selectedIdx = max(0, m.selectedIdx-pageSize)
-					m.updateSelectedJobID()
+				// Move up by pageSize visible jobs
+				for i := 0; i < pageSize; i++ {
+					prevIdx := m.findPrevVisibleJob(m.selectedIdx)
+					if prevIdx < 0 {
+						break
+					}
+					m.selectedIdx = prevIdx
 				}
+				m.updateSelectedJobID()
 			} else if m.currentView == tuiViewReview {
 				m.reviewScroll = max(0, m.reviewScroll-pageSize)
 			} else if m.currentView == tuiViewPrompt {
@@ -480,10 +709,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgdown":
 			pageSize := max(1, m.height-10)
 			if m.currentView == tuiViewQueue {
-				if len(m.jobs) > 0 {
-					m.selectedIdx = min(len(m.jobs)-1, m.selectedIdx+pageSize)
-					m.updateSelectedJobID()
+				// Move down by pageSize visible jobs
+				for i := 0; i < pageSize; i++ {
+					nextIdx := m.findNextVisibleJob(m.selectedIdx)
+					if nextIdx < 0 {
+						break
+					}
+					m.selectedIdx = nextIdx
 				}
+				m.updateSelectedJobID()
 			} else if m.currentView == tuiViewReview {
 				m.reviewScroll += pageSize
 			} else if m.currentView == tuiViewPrompt {
@@ -580,8 +814,26 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "f":
+			// Open filter modal
+			if m.currentView == tuiViewQueue {
+				m.filterRepos = nil // Clear previous repos (will show loading)
+				m.filterSelectedIdx = 0
+				m.filterSearch = ""
+				m.currentView = tuiViewFilter
+				return m, m.fetchRepos()
+			}
+
 		case "esc":
-			if m.currentView == tuiViewReview {
+			if m.currentView == tuiViewQueue && m.activeRepoFilter != "" {
+				// Clear filter
+				m.activeRepoFilter = ""
+				// Reset selection to first job
+				m.selectedIdx = 0
+				if len(m.jobs) > 0 {
+					m.selectedJobID = m.jobs[0].ID
+				}
+			} else if m.currentView == tuiViewReview {
 				m.currentView = tuiViewQueue
 				m.currentReview = nil
 				m.reviewScroll = 0
@@ -625,12 +877,39 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !found {
 				// Job was removed - clamp index to valid range
 				m.selectedIdx = max(0, min(len(m.jobs)-1, m.selectedIdx))
-				m.selectedJobID = m.jobs[m.selectedIdx].ID
+				// If filter is active, ensure we're on a visible job
+				if m.activeRepoFilter != "" {
+					firstVisible := m.findFirstVisibleJob()
+					if firstVisible >= 0 {
+						m.selectedIdx = firstVisible
+						m.selectedJobID = m.jobs[firstVisible].ID
+					} else {
+						m.selectedJobID = m.jobs[m.selectedIdx].ID
+					}
+				} else {
+					m.selectedJobID = m.jobs[m.selectedIdx].ID
+				}
+			} else if m.activeRepoFilter != "" {
+				// Job exists but check if it matches the filter
+				if m.jobs[m.selectedIdx].RepoName != m.activeRepoFilter {
+					// Selected job doesn't match filter, select first visible
+					firstVisible := m.findFirstVisibleJob()
+					if firstVisible >= 0 {
+						m.selectedIdx = firstVisible
+						m.selectedJobID = m.jobs[firstVisible].ID
+					}
+				}
 			}
 		} else {
-			// No job was selected yet, select first job
-			m.selectedIdx = 0
-			m.selectedJobID = m.jobs[0].ID
+			// No job was selected yet, select first visible job
+			firstVisible := m.findFirstVisibleJob()
+			if firstVisible >= 0 {
+				m.selectedIdx = firstVisible
+				m.selectedJobID = m.jobs[firstVisible].ID
+			} else {
+				m.selectedIdx = 0
+				m.selectedJobID = m.jobs[0].ID
+			}
 		}
 
 	case tuiStatusMsg:
@@ -678,6 +957,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		}
 
+	case tuiReposMsg:
+		// Populate filter repos with "All repos" as first option
+		m.filterRepos = []repoFilterItem{{name: "", count: msg.totalCount}}
+		m.filterRepos = append(m.filterRepos, msg.repos...)
+		// Pre-select current filter if active
+		if m.activeRepoFilter != "" {
+			for i, r := range m.filterRepos {
+				if r.name == m.activeRepoFilter {
+					m.filterSelectedIdx = i
+					break
+				}
+			}
+		}
+
 	case tuiErrMsg:
 		m.err = msg
 	}
@@ -686,6 +979,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) View() string {
+	if m.currentView == tuiViewFilter {
+		return m.renderFilterView()
+	}
 	if m.currentView == tuiViewPrompt && m.currentReview != nil {
 		return m.renderPromptView()
 	}
@@ -698,33 +994,61 @@ func (m tuiModel) View() string {
 func (m tuiModel) renderQueueView() string {
 	var b strings.Builder
 
-	// Title with version info
-	b.WriteString(tuiTitleStyle.Render(fmt.Sprintf("RoboRev Queue (cli: %s, daemon: %s)", version.Version, m.daemonVersion)))
-	b.WriteString("\n")
-
-	// Status line
-	statusLine := fmt.Sprintf("Workers: %d/%d | Queued: %d | Running: %d | Done: %d | Failed: %d | Canceled: %d",
-		m.status.ActiveWorkers, m.status.MaxWorkers,
-		m.status.QueuedJobs, m.status.RunningJobs,
-		m.status.CompletedJobs, m.status.FailedJobs,
-		m.status.CanceledJobs)
-	b.WriteString(tuiStatusStyle.Render(statusLine))
-	b.WriteString("\n")
-
-	// Update notification
-	if m.updateAvailable != "" {
-		updateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
-		b.WriteString(updateStyle.Render(fmt.Sprintf("Update available: %s - run 'roborev update'", m.updateAvailable)))
-		b.WriteString("\n")
+	// Title with version, optional update notification, and filter indicator
+	title := fmt.Sprintf("RoboRev Queue (%s)", version.Version)
+	if m.activeRepoFilter != "" {
+		title += fmt.Sprintf(" [f: %s]", m.activeRepoFilter)
 	}
+	b.WriteString(tuiTitleStyle.Render(title))
 	b.WriteString("\n")
 
-	if len(m.jobs) == 0 {
-		b.WriteString("No jobs in queue\n")
+	// Status line - show filtered counts when filter is active
+	var statusLine string
+	if m.activeRepoFilter != "" {
+		// Calculate counts from filtered jobs
+		var queued, running, done, failed, canceled int
+		for _, job := range m.jobs {
+			if job.RepoName != m.activeRepoFilter {
+				continue
+			}
+			switch job.Status {
+			case storage.JobStatusQueued:
+				queued++
+			case storage.JobStatusRunning:
+				running++
+			case storage.JobStatusDone:
+				done++
+			case storage.JobStatusFailed:
+				failed++
+			case storage.JobStatusCanceled:
+				canceled++
+			}
+		}
+		statusLine = fmt.Sprintf("Queued: %d | Running: %d | Done: %d | Failed: %d | Canceled: %d",
+			queued, running, done, failed, canceled)
+	} else {
+		statusLine = fmt.Sprintf("Workers: %d/%d | Queued: %d | Running: %d | Done: %d | Failed: %d | Canceled: %d",
+			m.status.ActiveWorkers, m.status.MaxWorkers,
+			m.status.QueuedJobs, m.status.RunningJobs,
+			m.status.CompletedJobs, m.status.FailedJobs,
+			m.status.CanceledJobs)
+	}
+	b.WriteString(tuiStatusStyle.Render(statusLine))
+	b.WriteString("\n\n")
+
+	visibleJobList := m.getVisibleJobs()
+	visibleSelectedIdx := m.getVisibleSelectedIdx()
+
+	if len(visibleJobList) == 0 {
+		if m.activeRepoFilter != "" {
+			b.WriteString("No jobs matching filter\n")
+		} else {
+			b.WriteString("No jobs in queue\n")
+		}
 	} else {
 		// Calculate ID column width based on max ID
 		idWidth := 2 // minimum width
-		for _, job := range m.jobs {
+		for _, job := range visibleJobList {
 			w := len(fmt.Sprintf("%d", job.ID))
 			if w > idWidth {
 				idWidth = w
@@ -740,34 +1064,34 @@ func (m tuiModel) renderQueueView() string {
 		b.WriteString("\n")
 
 		// Calculate visible job range based on terminal height
-		// Reserve lines for: title(2) + status(2) + header(2) + help(3) + scroll indicator(1)
-		reservedLines := 10
-		visibleJobs := m.height - reservedLines
-		if visibleJobs < 3 {
-			visibleJobs = 3 // Show at least 3 jobs
+		// Reserve lines for: title(1) + status(2) + header(2) + help(3) + scroll indicator(1)
+		reservedLines := 9
+		visibleRows := m.height - reservedLines
+		if visibleRows < 3 {
+			visibleRows = 3 // Show at least 3 jobs
 		}
 
 		// Determine which jobs to show, keeping selected item visible
 		start := 0
-		end := len(m.jobs)
+		end := len(visibleJobList)
 
-		if len(m.jobs) > visibleJobs {
+		if len(visibleJobList) > visibleRows {
 			// Center the selected item when possible
-			start = m.selectedIdx - visibleJobs/2
+			start = visibleSelectedIdx - visibleRows/2
 			if start < 0 {
 				start = 0
 			}
-			end = start + visibleJobs
-			if end > len(m.jobs) {
-				end = len(m.jobs)
-				start = end - visibleJobs
+			end = start + visibleRows
+			if end > len(visibleJobList) {
+				end = len(visibleJobList)
+				start = end - visibleRows
 			}
 		}
 
 		// Jobs
 		for i := start; i < end; i++ {
-			job := m.jobs[i]
-			selected := i == m.selectedIdx
+			job := visibleJobList[i]
+			selected := i == visibleSelectedIdx
 			line := m.renderJobLine(job, selected, idWidth)
 			if selected {
 				line = tuiSelectedStyle.Render("> " + line)
@@ -779,16 +1103,28 @@ func (m tuiModel) renderQueueView() string {
 		}
 
 		// Show scroll indicator if not all jobs visible
-		if len(m.jobs) > visibleJobs {
-			scrollInfo := fmt.Sprintf("[showing %d-%d of %d]", start+1, end, len(m.jobs))
+		if len(visibleJobList) > visibleRows {
+			scrollInfo := fmt.Sprintf("[showing %d-%d of %d]", start+1, end, len(visibleJobList))
 			b.WriteString(tuiStatusStyle.Render(scrollInfo))
 			b.WriteString("\n")
 		}
 	}
 
+	// Update notification (or blank line if no update)
+	if m.updateAvailable != "" {
+		updateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
+		b.WriteString(updateStyle.Render(fmt.Sprintf("Update available: %s - run 'roborev update'", m.updateAvailable)))
+		b.WriteString("\n")
+	} else {
+		b.WriteString("\n")
+	}
+
 	// Help (two lines)
-	helpText := "up/down/pgup/pgdn: navigate | enter: review | p: prompt | q: quit\n" +
+	helpText := "up/down/pgup/pgdn: navigate | enter: review | p: prompt | f: filter | q: quit\n" +
 		"a: toggle addressed | x: cancel running/queued job"
+	if m.activeRepoFilter != "" {
+		helpText += " | esc: clear filter"
+	}
 	b.WriteString(tuiHelpStyle.Render(helpText))
 
 	return b.String()
@@ -987,6 +1323,56 @@ func (m tuiModel) renderPromptView() string {
 	}
 
 	b.WriteString(tuiHelpStyle.Render("up/down: scroll | p: back to review | esc/q: back"))
+
+	return b.String()
+}
+
+func (m tuiModel) renderFilterView() string {
+	var b strings.Builder
+
+	b.WriteString(tuiTitleStyle.Render("Filter by Repository"))
+	b.WriteString("\n\n")
+
+	// Show loading state if repos haven't been fetched yet
+	if m.filterRepos == nil {
+		b.WriteString(tuiStatusStyle.Render("Loading repos..."))
+		b.WriteString("\n\n")
+		b.WriteString(tuiHelpStyle.Render("esc: cancel"))
+		return b.String()
+	}
+
+	// Search box
+	searchDisplay := m.filterSearch
+	if searchDisplay == "" {
+		searchDisplay = tuiStatusStyle.Render("Type to search...")
+	}
+	b.WriteString(fmt.Sprintf("Search: %s", searchDisplay))
+	b.WriteString("\n\n")
+
+	visible := m.getVisibleFilterRepos()
+	for i, repo := range visible {
+		var line string
+		if repo.name == "" {
+			line = fmt.Sprintf("All repos (%d)", repo.count)
+		} else {
+			line = fmt.Sprintf("%s (%d)", repo.name, repo.count)
+		}
+
+		if i == m.filterSelectedIdx {
+			b.WriteString(tuiSelectedStyle.Render("> " + line))
+		} else {
+			b.WriteString("  " + line)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(visible) == 0 {
+		b.WriteString(tuiStatusStyle.Render("  No matching repos"))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(tuiHelpStyle.Render("up/down: navigate | enter: select | esc: cancel | type to search"))
 
 	return b.String()
 }

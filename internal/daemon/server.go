@@ -37,6 +37,7 @@ func NewServer(db *storage.DB, cfg *config.Config) *Server {
 	mux.HandleFunc("/api/enqueue", s.handleEnqueue)
 	mux.HandleFunc("/api/jobs", s.handleListJobs)
 	mux.HandleFunc("/api/job/cancel", s.handleCancelJob)
+	mux.HandleFunc("/api/repos", s.handleListRepos)
 	mux.HandleFunc("/api/review", s.handleGetReview)
 	mux.HandleFunc("/api/review/address", s.handleAddressReview)
 	mux.HandleFunc("/api/respond", s.handleAddResponse)
@@ -241,6 +242,24 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"jobs": jobs})
+}
+
+func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	repos, totalCount, err := s.db.ListReposWithReviewCounts()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list repos: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"repos":       repos,
+		"total_count": totalCount,
+	})
 }
 
 type CancelJobRequest struct {

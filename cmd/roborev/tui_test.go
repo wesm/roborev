@@ -976,3 +976,412 @@ func TestTUICancelOnlyRunningOrQueued(t *testing.T) {
 		})
 	}
 }
+
+// Tests for filter functionality
+
+func TestTUIFilterOpenModal(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-b"},
+		{ID: 3, RepoName: "repo-a"},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.currentView = tuiViewQueue
+
+	// Press 'f' to open filter modal
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m2 := updated.(tuiModel)
+
+	if m2.currentView != tuiViewFilter {
+		t.Errorf("Expected tuiViewFilter, got %d", m2.currentView)
+	}
+	// filterRepos should be nil (loading state) until async fetch completes
+	if m2.filterRepos != nil {
+		t.Errorf("Expected filterRepos=nil (loading), got %d repos", len(m2.filterRepos))
+	}
+	if m2.filterSelectedIdx != 0 {
+		t.Errorf("Expected filterSelectedIdx=0 (All repos), got %d", m2.filterSelectedIdx)
+	}
+	if m2.filterSearch != "" {
+		t.Errorf("Expected empty filterSearch, got '%s'", m2.filterSearch)
+	}
+	if cmd == nil {
+		t.Error("Expected a fetch command to be returned")
+	}
+}
+
+func TestTUIFilterReposMsg(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewFilter
+
+	// Simulate receiving repos from API
+	repos := []repoFilterItem{
+		{name: "repo-a", count: 2},
+		{name: "repo-b", count: 1},
+		{name: "repo-c", count: 1},
+	}
+	msg := tuiReposMsg{repos: repos, totalCount: 4}
+
+	updated, _ := m.Update(msg)
+	m2 := updated.(tuiModel)
+
+	// Should have: All repos (prepended), then the 3 repos from API
+	if len(m2.filterRepos) != 4 {
+		t.Fatalf("Expected 4 filter repos, got %d", len(m2.filterRepos))
+	}
+	if m2.filterRepos[0].name != "" || m2.filterRepos[0].count != 4 {
+		t.Errorf("Expected All repos with count 4, got name='%s' count=%d", m2.filterRepos[0].name, m2.filterRepos[0].count)
+	}
+	if m2.filterRepos[1].name != "repo-a" || m2.filterRepos[1].count != 2 {
+		t.Errorf("Expected repo-a with count 2, got name='%s' count=%d", m2.filterRepos[1].name, m2.filterRepos[1].count)
+	}
+	if m2.filterRepos[2].name != "repo-b" || m2.filterRepos[2].count != 1 {
+		t.Errorf("Expected repo-b with count 1, got name='%s' count=%d", m2.filterRepos[2].name, m2.filterRepos[2].count)
+	}
+	if m2.filterRepos[3].name != "repo-c" || m2.filterRepos[3].count != 1 {
+		t.Errorf("Expected repo-c with count 1, got name='%s' count=%d", m2.filterRepos[3].name, m2.filterRepos[3].count)
+	}
+}
+
+func TestTUIFilterSearch(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	m.filterRepos = []repoFilterItem{
+		{name: "", count: 10},
+		{name: "repo-alpha", count: 5},
+		{name: "repo-beta", count: 3},
+		{name: "something-else", count: 2},
+	}
+
+	// No search - all visible
+	visible := m.getVisibleFilterRepos()
+	if len(visible) != 4 {
+		t.Errorf("No search: expected 4 visible, got %d", len(visible))
+	}
+
+	// Search for "repo"
+	m.filterSearch = "repo"
+	visible = m.getVisibleFilterRepos()
+	if len(visible) != 3 { // All repos + repo-alpha + repo-beta
+		t.Errorf("Search 'repo': expected 3 visible, got %d", len(visible))
+	}
+
+	// Search for "alpha"
+	m.filterSearch = "alpha"
+	visible = m.getVisibleFilterRepos()
+	if len(visible) != 2 { // All repos + repo-alpha
+		t.Errorf("Search 'alpha': expected 2 visible, got %d", len(visible))
+	}
+
+	// Search for "xyz" - no matches
+	m.filterSearch = "xyz"
+	visible = m.getVisibleFilterRepos()
+	if len(visible) != 1 { // Only "All repos" always included
+		t.Errorf("Search 'xyz': expected 1 visible (All repos), got %d", len(visible))
+	}
+}
+
+func TestTUIFilterNavigation(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewFilter
+	m.filterRepos = []repoFilterItem{
+		{name: "", count: 10},
+		{name: "repo-a", count: 5},
+		{name: "repo-b", count: 3},
+	}
+	m.filterSelectedIdx = 0
+
+	// Navigate down
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m2 := updated.(tuiModel)
+	if m2.filterSelectedIdx != 1 {
+		t.Errorf("j key: expected filterSelectedIdx=1, got %d", m2.filterSelectedIdx)
+	}
+
+	// Navigate down again
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m3 := updated.(tuiModel)
+	if m3.filterSelectedIdx != 2 {
+		t.Errorf("j key: expected filterSelectedIdx=2, got %d", m3.filterSelectedIdx)
+	}
+
+	// Navigate down at boundary - should stay at 2
+	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m4 := updated.(tuiModel)
+	if m4.filterSelectedIdx != 2 {
+		t.Errorf("j key at boundary: expected filterSelectedIdx=2, got %d", m4.filterSelectedIdx)
+	}
+
+	// Navigate up
+	updated, _ = m4.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m5 := updated.(tuiModel)
+	if m5.filterSelectedIdx != 1 {
+		t.Errorf("k key: expected filterSelectedIdx=1, got %d", m5.filterSelectedIdx)
+	}
+}
+
+func TestTUIFilterSelectRepo(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-b"},
+		{ID: 3, RepoName: "repo-a"},
+	}
+	m.currentView = tuiViewFilter
+	m.filterRepos = []repoFilterItem{
+		{name: "", count: 3},
+		{name: "repo-a", count: 2},
+		{name: "repo-b", count: 1},
+	}
+	m.filterSelectedIdx = 1 // repo-a
+
+	// Press enter to select
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(tuiModel)
+
+	if m2.currentView != tuiViewQueue {
+		t.Errorf("Expected tuiViewQueue, got %d", m2.currentView)
+	}
+	if m2.activeRepoFilter != "repo-a" {
+		t.Errorf("Expected activeRepoFilter='repo-a', got '%s'", m2.activeRepoFilter)
+	}
+	// Should select first visible job (ID=1 which is repo-a)
+	if m2.selectedIdx != 0 {
+		t.Errorf("Expected selectedIdx=0, got %d", m2.selectedIdx)
+	}
+}
+
+func TestTUIFilterClearWithEsc(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-b"},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.currentView = tuiViewQueue
+	m.activeRepoFilter = "repo-a"
+
+	// Press Esc to clear filter
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m2 := updated.(tuiModel)
+
+	if m2.activeRepoFilter != "" {
+		t.Errorf("Expected activeRepoFilter to be cleared, got '%s'", m2.activeRepoFilter)
+	}
+	if m2.selectedIdx != 0 {
+		t.Errorf("Expected selectedIdx=0, got %d", m2.selectedIdx)
+	}
+}
+
+func TestTUIFilterEscapeCloses(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewFilter
+	m.filterSearch = "test"
+	m.filterRepos = []repoFilterItem{{name: "", count: 1}}
+
+	// Press 'esc' to close without selecting
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m2 := updated.(tuiModel)
+
+	if m2.currentView != tuiViewQueue {
+		t.Errorf("Expected tuiViewQueue, got %d", m2.currentView)
+	}
+	if m2.filterSearch != "" {
+		t.Errorf("Expected filterSearch to be cleared, got '%s'", m2.filterSearch)
+	}
+}
+
+func TestTUIFilterTypingSearch(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewFilter
+	m.filterRepos = []repoFilterItem{
+		{name: "", count: 10},
+		{name: "repo-a", count: 5},
+	}
+	m.filterSelectedIdx = 1
+
+	// Type 'a'
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m2 := updated.(tuiModel)
+
+	if m2.filterSearch != "a" {
+		t.Errorf("Expected filterSearch='a', got '%s'", m2.filterSearch)
+	}
+	if m2.filterSelectedIdx != 0 {
+		t.Errorf("Expected filterSelectedIdx reset to 0, got %d", m2.filterSelectedIdx)
+	}
+
+	// Type 'b'
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m3 := updated.(tuiModel)
+
+	if m3.filterSearch != "ab" {
+		t.Errorf("Expected filterSearch='ab', got '%s'", m3.filterSearch)
+	}
+
+	// Backspace
+	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m4 := updated.(tuiModel)
+
+	if m4.filterSearch != "a" {
+		t.Errorf("Expected filterSearch='a' after backspace, got '%s'", m4.filterSearch)
+	}
+}
+
+func TestTUIQueueNavigationWithFilter(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Jobs from two repos, interleaved
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-b"},
+		{ID: 3, RepoName: "repo-a"},
+		{ID: 4, RepoName: "repo-b"},
+		{ID: 5, RepoName: "repo-a"},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.currentView = tuiViewQueue
+	m.activeRepoFilter = "repo-a" // Filter to only repo-a jobs
+
+	// Navigate down - should skip repo-b jobs
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m2 := updated.(tuiModel)
+
+	// Should jump from ID=1 (idx 0) to ID=3 (idx 2), skipping ID=2 (repo-b)
+	if m2.selectedIdx != 2 {
+		t.Errorf("Expected selectedIdx=2, got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 3 {
+		t.Errorf("Expected selectedJobID=3, got %d", m2.selectedJobID)
+	}
+
+	// Navigate down again - should go to ID=5
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m3 := updated.(tuiModel)
+
+	if m3.selectedIdx != 4 {
+		t.Errorf("Expected selectedIdx=4, got %d", m3.selectedIdx)
+	}
+	if m3.selectedJobID != 5 {
+		t.Errorf("Expected selectedJobID=5, got %d", m3.selectedJobID)
+	}
+
+	// Navigate up - should go back to ID=3
+	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m4 := updated.(tuiModel)
+
+	if m4.selectedIdx != 2 {
+		t.Errorf("Expected selectedIdx=2, got %d", m4.selectedIdx)
+	}
+}
+
+func TestTUIGetVisibleJobs(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-b"},
+		{ID: 3, RepoName: "repo-a"},
+	}
+
+	// No filter - all jobs visible
+	visible := m.getVisibleJobs()
+	if len(visible) != 3 {
+		t.Errorf("No filter: expected 3 visible, got %d", len(visible))
+	}
+
+	// Filter to repo-a
+	m.activeRepoFilter = "repo-a"
+	visible = m.getVisibleJobs()
+	if len(visible) != 2 {
+		t.Errorf("Filter repo-a: expected 2 visible, got %d", len(visible))
+	}
+	if visible[0].ID != 1 || visible[1].ID != 3 {
+		t.Errorf("Expected IDs 1 and 3, got %d and %d", visible[0].ID, visible[1].ID)
+	}
+
+	// Filter to non-existent repo
+	m.activeRepoFilter = "repo-xyz"
+	visible = m.getVisibleJobs()
+	if len(visible) != 0 {
+		t.Errorf("Filter repo-xyz: expected 0 visible, got %d", len(visible))
+	}
+}
+
+func TestTUIJobsRefreshWithFilter(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Initial state with filter active
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-b"},
+		{ID: 3, RepoName: "repo-a"},
+	}
+	m.selectedIdx = 2
+	m.selectedJobID = 3
+	m.activeRepoFilter = "repo-a"
+
+	// Jobs refresh - same jobs
+	newJobs := tuiJobsMsg([]storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-b"},
+		{ID: 3, RepoName: "repo-a"},
+	})
+
+	updated, _ := m.Update(newJobs)
+	m2 := updated.(tuiModel)
+
+	// Selection should be maintained
+	if m2.selectedIdx != 2 {
+		t.Errorf("Expected selectedIdx=2, got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 3 {
+		t.Errorf("Expected selectedJobID=3, got %d", m2.selectedJobID)
+	}
+
+	// Now the selected job is removed
+	newJobs = tuiJobsMsg([]storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-b"},
+	})
+
+	updated, _ = m2.Update(newJobs)
+	m3 := updated.(tuiModel)
+
+	// Should select first visible job (ID=1, repo-a)
+	if m3.selectedIdx != 0 {
+		t.Errorf("Expected selectedIdx=0, got %d", m3.selectedIdx)
+	}
+	if m3.selectedJobID != 1 {
+		t.Errorf("Expected selectedJobID=1, got %d", m3.selectedJobID)
+	}
+}
+
+func TestTUIFilterPreselectsCurrent(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewFilter
+	m.activeRepoFilter = "repo-b" // Already filtering to repo-b
+
+	// Simulate receiving repos from API (should pre-select repo-b)
+	repos := []repoFilterItem{
+		{name: "repo-a", count: 1},
+		{name: "repo-b", count: 1},
+	}
+	msg := tuiReposMsg{repos: repos, totalCount: 2}
+
+	updated, _ := m.Update(msg)
+	m2 := updated.(tuiModel)
+
+	// filterRepos should be: All repos, repo-a, repo-b
+	// repo-b should be at index 2, which should be pre-selected
+	if m2.filterSelectedIdx != 2 {
+		t.Errorf("Expected filterSelectedIdx=2 (repo-b), got %d", m2.filterSelectedIdx)
+	}
+}
