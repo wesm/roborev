@@ -1317,6 +1317,47 @@ func TestTUIGetVisibleJobs(t *testing.T) {
 	}
 }
 
+func TestTUIGetVisibleSelectedIdx(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-b"},
+		{ID: 3, RepoName: "repo-a"},
+	}
+
+	// No filter, valid selection
+	m.selectedIdx = 1
+	if idx := m.getVisibleSelectedIdx(); idx != 1 {
+		t.Errorf("No filter, selectedIdx=1: expected 1, got %d", idx)
+	}
+
+	// No filter, selectedIdx=-1 returns -1
+	m.selectedIdx = -1
+	if idx := m.getVisibleSelectedIdx(); idx != -1 {
+		t.Errorf("No filter, selectedIdx=-1: expected -1, got %d", idx)
+	}
+
+	// With filter, selectedIdx=-1 returns -1
+	m.activeRepoFilter = "repo-a"
+	m.selectedIdx = -1
+	if idx := m.getVisibleSelectedIdx(); idx != -1 {
+		t.Errorf("Filter active, selectedIdx=-1: expected -1, got %d", idx)
+	}
+
+	// With filter, selection matches visible job (job ID=3 is second visible in repo-a)
+	m.selectedIdx = 2 // index in m.jobs for job ID=3
+	if idx := m.getVisibleSelectedIdx(); idx != 1 {
+		t.Errorf("Filter active, selectedIdx=2 (ID=3): expected visible idx 1, got %d", idx)
+	}
+
+	// With filter, selection doesn't match filter - returns -1
+	m.selectedIdx = 1 // index in m.jobs for job ID=2 (repo-b, not visible)
+	if idx := m.getVisibleSelectedIdx(); idx != -1 {
+		t.Errorf("Filter active, selection not visible: expected -1, got %d", idx)
+	}
+}
+
 func TestTUIJobsRefreshWithFilter(t *testing.T) {
 	m := newTuiModel("http://localhost")
 

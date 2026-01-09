@@ -534,7 +534,11 @@ func (m tuiModel) findVisibleJobIndex(visibleIdx int) int {
 }
 
 // getVisibleSelectedIdx returns the index within visible jobs for the current selection
+// Returns -1 if selectedIdx is -1 or doesn't match any visible job
 func (m tuiModel) getVisibleSelectedIdx() int {
+	if m.selectedIdx < 0 {
+		return -1
+	}
 	if m.activeRepoFilter == "" {
 		return m.selectedIdx
 	}
@@ -547,7 +551,7 @@ func (m tuiModel) getVisibleSelectedIdx() int {
 			count++
 		}
 	}
-	return 0
+	return -1
 }
 
 // findNextVisibleJob finds the next job index in m.jobs that matches the filter
