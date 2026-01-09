@@ -2473,14 +2473,14 @@ func TestTUILoadingMoreClearedOnError(t *testing.T) {
 	m := newTuiModel("http://localhost")
 	m.loadingMore = true
 
-	// Error arrives
-	errMsg := tuiErrMsg(fmt.Errorf("network error"))
+	// Pagination error arrives (only pagination errors clear loadingMore)
+	errMsg := tuiPaginationErrMsg(fmt.Errorf("network error"))
 	updated, _ := m.Update(errMsg)
 	m2 := updated.(tuiModel)
 
 	// loadingMore should be cleared so user can retry
 	if m2.loadingMore {
-		t.Error("loadingMore should be cleared on error")
+		t.Error("loadingMore should be cleared on pagination error")
 	}
 
 	// Error should be set

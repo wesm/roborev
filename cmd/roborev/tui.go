@@ -116,7 +116,8 @@ type tuiCancelResultMsg struct {
 	err           error
 }
 type tuiErrMsg error
-type tuiUpdateCheckMsg string // Latest version if available, empty if up to date
+type tuiPaginationErrMsg error // Pagination-specific error (clears loadingMore)
+type tuiUpdateCheckMsg string  // Latest version if available, empty if up to date
 type tuiReposMsg struct {
 	repos      []repoFilterItem
 	totalCount int
@@ -197,12 +198,12 @@ func (m tuiModel) fetchMoreJobs() tea.Cmd {
 		url := fmt.Sprintf("%s/api/jobs?limit=50&offset=%d", m.serverAddr, offset)
 		resp, err := m.client.Get(url)
 		if err != nil {
-			return tuiErrMsg(err)
+			return tuiPaginationErrMsg(err)
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			return tuiErrMsg(fmt.Errorf("fetch more jobs: %s", resp.Status))
+			return tuiPaginationErrMsg(fmt.Errorf("fetch more jobs: %s", resp.Status))
 		}
 
 		var result struct {
@@ -210,7 +211,7 @@ func (m tuiModel) fetchMoreJobs() tea.Cmd {
 			HasMore bool                `json:"has_more"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return tuiErrMsg(err)
+			return tuiPaginationErrMsg(err)
 		}
 		return tuiJobsMsg{jobs: result.Jobs, hasMore: result.HasMore, append: true}
 	}
@@ -979,6 +980,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.currentView == tuiViewQueue && m.activeRepoFilter != "" {
 				// Clear filter and refetch all jobs
 				m.activeRepoFilter = ""
+				// Reset to default 50-job view (clear jobs so fetchJobs uses limit=50)
+				m.jobs = nil
+				m.hasMore = false
 				// Invalidate selection until refetch completes
 				m.selectedIdx = -1
 				m.selectedJobID = 0
@@ -1005,6 +1009,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tuiTickMsg:
+		// Skip job refresh while pagination is in flight to prevent race conditions
+		if m.loadingMore {
+			return m, tea.Batch(m.tick(), m.fetchStatus())
+		}
 		return m, tea.Batch(m.tick(), m.fetchJobs(), m.fetchStatus())
 
 	case tuiJobsMsg:
@@ -1170,9 +1178,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case tuiPaginationErrMsg:
+		m.err = msg
+		m.loadingMore = false // Clear loading state so user can retry pagination
+
 	case tuiErrMsg:
 		m.err = msg
-		m.loadingMore = false // Clear loading state so user can retry
 	}
 
 	return m, nil
