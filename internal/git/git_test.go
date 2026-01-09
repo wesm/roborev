@@ -151,4 +151,58 @@ func TestIsRebaseInProgress(t *testing.T) {
 			t.Error("expected false for non-repo")
 		}
 	})
+
+	t.Run("worktree with rebase", func(t *testing.T) {
+		// Create initial commit so we can create a worktree
+		if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("content"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		exec.Command("git", "-C", tmpDir, "add", ".").Run()
+		exec.Command("git", "-C", tmpDir, "commit", "-m", "initial").Run()
+
+		// Create a worktree
+		worktreeDir := t.TempDir()
+		cmd := exec.Command("git", "-C", tmpDir, "worktree", "add", worktreeDir, "-b", "test-branch")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git worktree add failed: %v\n%s", err, out)
+		}
+		defer exec.Command("git", "-C", tmpDir, "worktree", "remove", worktreeDir).Run()
+
+		// Verify worktree has .git file (not directory)
+		gitPath := filepath.Join(worktreeDir, ".git")
+		info, err := os.Stat(gitPath)
+		if err != nil {
+			t.Fatalf("worktree .git not found: %v", err)
+		}
+		if info.IsDir() {
+			t.Skip("worktree has .git directory instead of file - older git version")
+		}
+
+		// No rebase in worktree
+		if IsRebaseInProgress(worktreeDir) {
+			t.Error("expected no rebase in worktree")
+		}
+
+		// Get the actual gitdir for the worktree to simulate rebase
+		gitDirCmd := exec.Command("git", "-C", worktreeDir, "rev-parse", "--git-dir")
+		gitDirOut, err := gitDirCmd.Output()
+		if err != nil {
+			t.Fatalf("git rev-parse --git-dir failed: %v", err)
+		}
+		worktreeGitDir := strings.TrimSpace(string(gitDirOut))
+		if !filepath.IsAbs(worktreeGitDir) {
+			worktreeGitDir = filepath.Join(worktreeDir, worktreeGitDir)
+		}
+
+		// Simulate rebase in worktree
+		rebaseMerge := filepath.Join(worktreeGitDir, "rebase-merge")
+		if err := os.MkdirAll(rebaseMerge, 0755); err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(rebaseMerge)
+
+		if !IsRebaseInProgress(worktreeDir) {
+			t.Error("expected rebase in progress in worktree")
+		}
+	})
 }
