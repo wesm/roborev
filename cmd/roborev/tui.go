@@ -139,10 +139,10 @@ func (m tuiModel) tick() tea.Cmd {
 
 func (m tuiModel) fetchJobs() tea.Cmd {
 	return func() tea.Msg {
-		// No limit when filtering to show full repo history, otherwise limit to 50
+		// No limit (limit=0) when filtering to show full repo history, otherwise limit to 50
 		var url string
 		if m.activeRepoFilter != "" {
-			url = fmt.Sprintf("%s/api/jobs?repo=%s", m.serverAddr, neturl.QueryEscape(m.activeRepoFilter))
+			url = fmt.Sprintf("%s/api/jobs?limit=0&repo=%s", m.serverAddr, neturl.QueryEscape(m.activeRepoFilter))
 		} else {
 			url = fmt.Sprintf("%s/api/jobs?limit=50", m.serverAddr)
 		}

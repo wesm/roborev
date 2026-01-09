@@ -234,7 +234,14 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 
 	status := r.URL.Query().Get("status")
 	repo := r.URL.Query().Get("repo")
-	limit := 50 // default
+
+	// Parse limit from query, default to 50, 0 means no limit
+	limit := 50
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if _, err := fmt.Sscanf(limitStr, "%d", &limit); err != nil {
+			limit = 50
+		}
+	}
 
 	jobs, err := s.db.ListJobs(status, repo, limit)
 	if err != nil {
