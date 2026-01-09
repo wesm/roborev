@@ -1385,3 +1385,100 @@ func TestTUIFilterPreselectsCurrent(t *testing.T) {
 		t.Errorf("Expected filterSelectedIdx=2 (repo-b), got %d", m2.filterSelectedIdx)
 	}
 }
+
+func TestTUIFilterToZeroVisibleJobs(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Jobs only in repo-a
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-a"},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.currentView = tuiViewFilter
+	m.filterRepos = []repoFilterItem{
+		{name: "", count: 2},
+		{name: "repo-a", count: 2},
+		{name: "repo-b", count: 0}, // No jobs
+	}
+	m.filterSelectedIdx = 2 // Select repo-b
+
+	// Press enter to select repo-b (which has no jobs)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(tuiModel)
+
+	// Selection should be cleared since no visible jobs
+	if m2.selectedIdx != -1 {
+		t.Errorf("Expected selectedIdx=-1 for zero visible jobs, got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 0 {
+		t.Errorf("Expected selectedJobID=0 for zero visible jobs, got %d", m2.selectedJobID)
+	}
+	if m2.activeRepoFilter != "repo-b" {
+		t.Errorf("Expected activeRepoFilter='repo-b', got '%s'", m2.activeRepoFilter)
+	}
+}
+
+func TestTUIRefreshWithZeroVisibleJobs(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Start with jobs in repo-a, filter active for repo-b
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+	}
+	m.activeRepoFilter = "repo-b" // Filter to repo with no jobs
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+
+	// Simulate jobs refresh
+	newJobs := []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a"},
+		{ID: 2, RepoName: "repo-a"},
+	}
+	updated, _ := m.Update(tuiJobsMsg(newJobs))
+	m2 := updated.(tuiModel)
+
+	// Selection should be cleared since no jobs match filter
+	if m2.selectedIdx != -1 {
+		t.Errorf("Expected selectedIdx=-1 for zero visible jobs after refresh, got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 0 {
+		t.Errorf("Expected selectedJobID=0 for zero visible jobs after refresh, got %d", m2.selectedJobID)
+	}
+}
+
+func TestTUIActionsNoOpWithZeroVisibleJobs(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Setup: filter active with no matching jobs
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoName: "repo-a", Status: storage.JobStatusDone},
+	}
+	m.activeRepoFilter = "repo-b"
+	m.selectedIdx = -1
+	m.selectedJobID = 0
+	m.currentView = tuiViewQueue
+
+	// Press enter - should be no-op
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(tuiModel)
+	if cmd != nil {
+		t.Error("Expected no command for enter with no visible jobs")
+	}
+	if m2.currentView != tuiViewQueue {
+		t.Errorf("Expected to stay in queue view, got %d", m2.currentView)
+	}
+
+	// Press 'x' (cancel) - should be no-op
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if cmd != nil {
+		t.Error("Expected no command for cancel with no visible jobs")
+	}
+
+	// Press 'a' (address) - should be no-op
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if cmd != nil {
+		t.Error("Expected no command for address with no visible jobs")
+	}
+}

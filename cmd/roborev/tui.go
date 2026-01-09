@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"github.com/wesm/roborev/internal/daemon"
 	"github.com/wesm/roborev/internal/storage"
 	"github.com/wesm/roborev/internal/update"
 	"github.com/wesm/roborev/internal/version"
@@ -56,8 +57,9 @@ type repoFilterItem struct {
 }
 
 type tuiModel struct {
-	serverAddr string
-	client     *http.Client
+	serverAddr    string
+	daemonVersion string
+	client        *http.Client
 	jobs            []storage.ReviewJob
 	status          storage.DaemonStatus
 	selectedIdx     int
@@ -108,13 +110,20 @@ type tuiReposMsg struct {
 }
 
 func newTuiModel(serverAddr string) tuiModel {
+	// Get daemon version from runtime info
+	daemonVersion := "?"
+	if info, err := daemon.ReadRuntime(); err == nil {
+		daemonVersion = info.Version
+	}
+
 	return tuiModel{
-		serverAddr:  serverAddr,
-		client:      &http.Client{Timeout: 10 * time.Second},
-		jobs:        []storage.ReviewJob{},
-		currentView: tuiViewQueue,
-		width:       80, // sensible defaults until we get WindowSizeMsg
-		height:      24,
+		serverAddr:    serverAddr,
+		daemonVersion: daemonVersion,
+		client:        &http.Client{Timeout: 10 * time.Second},
+		jobs:          []storage.ReviewJob{},
+		currentView:   tuiViewQueue,
+		width:         80, // sensible defaults until we get WindowSizeMsg
+		height:        24,
 	}
 }
 
@@ -606,11 +615,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.activeRepoFilter = selected.name
 					m.currentView = tuiViewQueue
 					m.filterSearch = ""
-					// Reset selection to first visible job
+					// Reset selection to first visible job, or clear if none
 					visibleJobs := m.getVisibleJobs()
 					if len(visibleJobs) > 0 {
 						m.selectedIdx = m.findVisibleJobIndex(0)
 						m.selectedJobID = visibleJobs[0].ID
+					} else {
+						m.selectedIdx = -1
+						m.selectedJobID = 0
 					}
 				}
 				return m, nil
@@ -621,13 +633,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			default:
-				// Handle typing for search
-				key := msg.String()
-				if len(key) == 1 {
-					r := rune(key[0])
-					if unicode.IsPrint(r) && !unicode.IsControl(r) {
-						m.filterSearch += key
-						m.filterSelectedIdx = 0 // Reset selection when search changes
+				// Handle typing for search (supports non-ASCII runes)
+				if len(msg.Runes) > 0 {
+					for _, r := range msg.Runes {
+						if unicode.IsPrint(r) && !unicode.IsControl(r) {
+							m.filterSearch += string(r)
+							m.filterSelectedIdx = 0 // Reset selection when search changes
+						}
 					}
 				}
 				return m, nil
@@ -884,7 +896,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selectedIdx = firstVisible
 						m.selectedJobID = m.jobs[firstVisible].ID
 					} else {
-						m.selectedJobID = m.jobs[m.selectedIdx].ID
+						// No visible jobs for this filter
+						m.selectedIdx = -1
+						m.selectedJobID = 0
 					}
 				} else {
 					m.selectedJobID = m.jobs[m.selectedIdx].ID
@@ -897,6 +911,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if firstVisible >= 0 {
 						m.selectedIdx = firstVisible
 						m.selectedJobID = m.jobs[firstVisible].ID
+					} else {
+						// No visible jobs for this filter
+						m.selectedIdx = -1
+						m.selectedJobID = 0
 					}
 				}
 			}
@@ -906,9 +924,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if firstVisible >= 0 {
 				m.selectedIdx = firstVisible
 				m.selectedJobID = m.jobs[firstVisible].ID
-			} else {
+			} else if m.activeRepoFilter == "" && len(m.jobs) > 0 {
+				// No filter, just select first job
 				m.selectedIdx = 0
 				m.selectedJobID = m.jobs[0].ID
+			} else {
+				// No visible jobs
+				m.selectedIdx = -1
+				m.selectedJobID = 0
 			}
 		}
 
@@ -1027,7 +1050,8 @@ func (m tuiModel) renderQueueView() string {
 		statusLine = fmt.Sprintf("Queued: %d | Running: %d | Done: %d | Failed: %d | Canceled: %d",
 			queued, running, done, failed, canceled)
 	} else {
-		statusLine = fmt.Sprintf("Workers: %d/%d | Queued: %d | Running: %d | Done: %d | Failed: %d | Canceled: %d",
+		statusLine = fmt.Sprintf("Daemon: %s | Workers: %d/%d | Queued: %d | Running: %d | Done: %d | Failed: %d | Canceled: %d",
+			m.daemonVersion,
 			m.status.ActiveWorkers, m.status.MaxWorkers,
 			m.status.QueuedJobs, m.status.RunningJobs,
 			m.status.CompletedJobs, m.status.FailedJobs,

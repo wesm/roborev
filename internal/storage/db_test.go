@@ -881,6 +881,112 @@ func TestMigrationWithAlterTableColumnOrder(t *testing.T) {
 	}
 }
 
+func TestListReposWithReviewCounts(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	t.Run("empty database", func(t *testing.T) {
+		repos, totalCount, err := db.ListReposWithReviewCounts()
+		if err != nil {
+			t.Fatalf("ListReposWithReviewCounts failed: %v", err)
+		}
+		if len(repos) != 0 {
+			t.Errorf("Expected 0 repos, got %d", len(repos))
+		}
+		if totalCount != 0 {
+			t.Errorf("Expected total count 0, got %d", totalCount)
+		}
+	})
+
+	// Create repos and jobs
+	repo1, _ := db.GetOrCreateRepo("/tmp/repo1")
+	repo2, _ := db.GetOrCreateRepo("/tmp/repo2")
+	repo3, _ := db.GetOrCreateRepo("/tmp/repo3") // will have 0 jobs
+
+	// Add jobs to repo1 (3 jobs)
+	for i := 0; i < 3; i++ {
+		sha := fmt.Sprintf("repo1-sha%d", i)
+		commit, _ := db.GetOrCreateCommit(repo1.ID, sha, "Author", "Subject", time.Now())
+		db.EnqueueJob(repo1.ID, commit.ID, sha, "codex")
+	}
+
+	// Add jobs to repo2 (2 jobs)
+	for i := 0; i < 2; i++ {
+		sha := fmt.Sprintf("repo2-sha%d", i)
+		commit, _ := db.GetOrCreateCommit(repo2.ID, sha, "Author", "Subject", time.Now())
+		db.EnqueueJob(repo2.ID, commit.ID, sha, "codex")
+	}
+
+	// repo3 has no jobs (to test 0 count)
+	_ = repo3
+
+	t.Run("repos with varying job counts", func(t *testing.T) {
+		repos, totalCount, err := db.ListReposWithReviewCounts()
+		if err != nil {
+			t.Fatalf("ListReposWithReviewCounts failed: %v", err)
+		}
+
+		// Should have 3 repos
+		if len(repos) != 3 {
+			t.Errorf("Expected 3 repos, got %d", len(repos))
+		}
+
+		// Total count should be 5 (3 + 2 + 0)
+		if totalCount != 5 {
+			t.Errorf("Expected total count 5, got %d", totalCount)
+		}
+
+		// Build map for easier assertions
+		repoMap := make(map[string]int)
+		for _, r := range repos {
+			repoMap[r.Name] = r.Count
+		}
+
+		if repoMap["repo1"] != 3 {
+			t.Errorf("Expected repo1 count 3, got %d", repoMap["repo1"])
+		}
+		if repoMap["repo2"] != 2 {
+			t.Errorf("Expected repo2 count 2, got %d", repoMap["repo2"])
+		}
+		if repoMap["repo3"] != 0 {
+			t.Errorf("Expected repo3 count 0, got %d", repoMap["repo3"])
+		}
+	})
+
+	t.Run("counts include all job statuses", func(t *testing.T) {
+		// Claim and complete one job in repo1
+		claimed, _ := db.ClaimJob("worker-1")
+		if claimed != nil {
+			db.CompleteJob(claimed.ID, "codex", "prompt", "output")
+		}
+
+		// Claim and fail another job
+		claimed2, _ := db.ClaimJob("worker-1")
+		if claimed2 != nil {
+			db.FailJob(claimed2.ID, "test error")
+		}
+
+		// Counts should still be the same (counts all jobs, not just completed)
+		repos, totalCount, err := db.ListReposWithReviewCounts()
+		if err != nil {
+			t.Fatalf("ListReposWithReviewCounts failed: %v", err)
+		}
+
+		if totalCount != 5 {
+			t.Errorf("Expected total count 5 (all statuses), got %d", totalCount)
+		}
+
+		repoMap := make(map[string]int)
+		for _, r := range repos {
+			repoMap[r.Name] = r.Count
+		}
+
+		if repoMap["repo1"] != 3 {
+			t.Errorf("Expected repo1 count 3 (all statuses), got %d", repoMap["repo1"])
+		}
+	})
+}
+
 func openTestDB(t *testing.T) *DB {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
