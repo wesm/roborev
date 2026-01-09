@@ -260,22 +260,7 @@ func initCmd() *cobra.Command {
 				return fmt.Errorf("get hooks path: %w", err)
 			}
 			hookPath := filepath.Join(hooksDir, "post-commit")
-
-			// Get full path to roborev executable to avoid PATH issues in hooks
-			roborevPath, err := exec.LookPath("roborev")
-			if err != nil {
-				roborevPath = "roborev" // Fallback to PATH lookup
-			}
-
-			// Create hook with proper quoting and fallback for moved/upgraded binaries
-			hookContent := fmt.Sprintf(`#!/bin/sh
-# RoboRev post-commit hook - auto-reviews every commit
-ROBOREV=%q
-if [ ! -x "$ROBOREV" ]; then
-    ROBOREV=$(command -v roborev) || exit 0
-fi
-"$ROBOREV" enqueue --quiet &
-`, roborevPath)
+			hookContent := generateHookContent()
 
 			// Ensure hooks directory exists
 			if err := os.MkdirAll(hooksDir, 0755); err != nil {
@@ -758,21 +743,7 @@ func installHookCmd() *cobra.Command {
 				return fmt.Errorf("create hooks directory: %w", err)
 			}
 
-			// Get full path to roborev executable to avoid PATH issues in hooks
-			roborevPath, err := exec.LookPath("roborev")
-			if err != nil {
-				roborevPath = "roborev" // Fallback to PATH lookup
-			}
-
-			// Create hook with proper quoting and fallback for moved/upgraded binaries
-			hookContent := fmt.Sprintf(`#!/bin/sh
-# RoboRev post-commit hook - auto-reviews every commit
-ROBOREV=%q
-if [ ! -x "$ROBOREV" ]; then
-    ROBOREV=$(command -v roborev) || exit 0
-fi
-"$ROBOREV" enqueue --quiet &
-`, roborevPath)
+			hookContent := generateHookContent()
 
 			if err := os.WriteFile(hookPath, []byte(hookContent), 0755); err != nil {
 				return fmt.Errorf("write hook: %w", err)
@@ -1006,4 +977,25 @@ func shortRef(ref string) string {
 		return ref
 	}
 	return shortSHA(ref)
+}
+
+// generateHookContent creates the post-commit hook script content.
+// It prefers the baked absolute path for security, falls back to PATH if missing.
+func generateHookContent() string {
+	// Get current roborev absolute path
+	roborevPath, err := exec.LookPath("roborev")
+	if err != nil {
+		roborevPath = "roborev"
+	}
+
+	// Prefer baked path (security), fall back to PATH only if baked is missing
+	return fmt.Sprintf(`#!/bin/sh
+# RoboRev post-commit hook - auto-reviews every commit
+ROBOREV=%q
+if [ ! -x "$ROBOREV" ]; then
+    ROBOREV=$(command -v roborev 2>/dev/null) || exit 0
+    [ ! -x "$ROBOREV" ] && exit 0
+fi
+"$ROBOREV" enqueue --quiet 2>/dev/null &
+`, roborevPath)
 }
