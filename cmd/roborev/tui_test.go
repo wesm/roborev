@@ -1672,3 +1672,510 @@ func TestTUIFilterViewScrollWindow(t *testing.T) {
 		}
 	})
 }
+
+// Tests for j/k and left/right review navigation
+
+func TestTUIReviewNavigationJNext(t *testing.T) {
+	// Test 'j' navigates to next viewable job (higher index) in review view
+	m := newTuiModel("http://localhost")
+
+	// Setup: 5 jobs, middle ones are queued/running (not viewable)
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusQueued},
+		{ID: 3, Status: storage.JobStatusRunning},
+		{ID: 4, Status: storage.JobStatusFailed},
+		{ID: 5, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 10, Job: &storage.ReviewJob{ID: 1}}
+	m.reviewScroll = 5 // Ensure scroll resets
+
+	// Press 'j' - should skip to job 4 (failed, viewable)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m2 := updated.(tuiModel)
+
+	if m2.selectedIdx != 3 {
+		t.Errorf("Expected selectedIdx=3 (job ID=4), got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 4 {
+		t.Errorf("Expected selectedJobID=4, got %d", m2.selectedJobID)
+	}
+	if m2.reviewScroll != 0 {
+		t.Errorf("Expected reviewScroll to reset to 0, got %d", m2.reviewScroll)
+	}
+	// For failed jobs, currentReview is set inline (no fetch command)
+	if m2.currentReview == nil {
+		t.Error("Expected currentReview to be set for failed job")
+	}
+	if cmd != nil {
+		t.Error("Expected no command for failed job (inline display)")
+	}
+}
+
+func TestTUIReviewNavigationKPrev(t *testing.T) {
+	// Test 'k' navigates to previous viewable job (lower index) in review view
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusQueued},
+		{ID: 3, Status: storage.JobStatusRunning},
+		{ID: 4, Status: storage.JobStatusFailed},
+		{ID: 5, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 4
+	m.selectedJobID = 5
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 50, Job: &storage.ReviewJob{ID: 5}}
+	m.reviewScroll = 10
+
+	// Press 'k' - should skip to job 4 (failed, viewable)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m2 := updated.(tuiModel)
+
+	if m2.selectedIdx != 3 {
+		t.Errorf("Expected selectedIdx=3 (job ID=4), got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 4 {
+		t.Errorf("Expected selectedJobID=4, got %d", m2.selectedJobID)
+	}
+	if m2.reviewScroll != 0 {
+		t.Errorf("Expected reviewScroll to reset to 0, got %d", m2.reviewScroll)
+	}
+}
+
+func TestTUIReviewNavigationLeftRight(t *testing.T) {
+	// Test left/right arrows mirror j/k in review view
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone},
+		{ID: 3, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 1
+	m.selectedJobID = 2
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 20, Job: &storage.ReviewJob{ID: 2}}
+
+	// Press 'left' - should navigate to next (higher index), like 'j'
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m2 := updated.(tuiModel)
+
+	if m2.selectedIdx != 2 {
+		t.Errorf("Left arrow: expected selectedIdx=2, got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 3 {
+		t.Errorf("Left arrow: expected selectedJobID=3, got %d", m2.selectedJobID)
+	}
+	// Should trigger fetch for done job
+	if cmd == nil {
+		t.Error("Left arrow: expected fetch command for done job")
+	}
+
+	// Reset and test 'right' - should navigate to prev (lower index), like 'k'
+	m.selectedIdx = 1
+	m.selectedJobID = 2
+	m.currentReview = &storage.Review{ID: 20, Job: &storage.ReviewJob{ID: 2}}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m3 := updated.(tuiModel)
+
+	if m3.selectedIdx != 0 {
+		t.Errorf("Right arrow: expected selectedIdx=0, got %d", m3.selectedIdx)
+	}
+	if m3.selectedJobID != 1 {
+		t.Errorf("Right arrow: expected selectedJobID=1, got %d", m3.selectedJobID)
+	}
+	if cmd == nil {
+		t.Error("Right arrow: expected fetch command for done job")
+	}
+}
+
+func TestTUIReviewNavigationBoundaries(t *testing.T) {
+	// Test navigation at boundaries (first/last viewable job)
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusQueued}, // Not viewable
+		{ID: 3, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 10, Job: &storage.ReviewJob{ID: 1}}
+
+	// Press 'k' at first viewable job - should be no-op
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m2 := updated.(tuiModel)
+
+	if m2.selectedIdx != 0 {
+		t.Errorf("Expected selectedIdx to remain 0 at boundary, got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 1 {
+		t.Errorf("Expected selectedJobID to remain 1 at boundary, got %d", m2.selectedJobID)
+	}
+	if cmd != nil {
+		t.Error("Expected no command at boundary")
+	}
+
+	// Now at last viewable job
+	m.selectedIdx = 2
+	m.selectedJobID = 3
+	m.currentReview = &storage.Review{ID: 30, Job: &storage.ReviewJob{ID: 3}}
+
+	// Press 'j' at last viewable job - should be no-op
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m3 := updated.(tuiModel)
+
+	if m3.selectedIdx != 2 {
+		t.Errorf("Expected selectedIdx to remain 2 at boundary, got %d", m3.selectedIdx)
+	}
+	if m3.selectedJobID != 3 {
+		t.Errorf("Expected selectedJobID to remain 3 at boundary, got %d", m3.selectedJobID)
+	}
+	if cmd != nil {
+		t.Error("Expected no command at boundary")
+	}
+}
+
+func TestTUIReviewNavigationFailedJobInline(t *testing.T) {
+	// Test that navigating to a failed job displays error inline
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusFailed, Agent: "codex", Error: "something went wrong"},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 10, Job: &storage.ReviewJob{ID: 1}}
+
+	// Press 'j' - should navigate to failed job and display inline
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m2 := updated.(tuiModel)
+
+	if m2.selectedIdx != 1 {
+		t.Errorf("Expected selectedIdx=1, got %d", m2.selectedIdx)
+	}
+	if m2.currentReview == nil {
+		t.Fatal("Expected currentReview to be set for failed job")
+	}
+	if m2.currentReview.Agent != "codex" {
+		t.Errorf("Expected agent='codex', got '%s'", m2.currentReview.Agent)
+	}
+	if !strings.Contains(m2.currentReview.Output, "something went wrong") {
+		t.Errorf("Expected output to contain error, got '%s'", m2.currentReview.Output)
+	}
+	// No fetch command for failed jobs - displayed inline
+	if cmd != nil {
+		t.Error("Expected no command for failed job (inline display)")
+	}
+}
+
+func TestTUIReviewStaleResponseIgnored(t *testing.T) {
+	// Test that stale review responses are ignored (race condition fix)
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 1
+	m.selectedJobID = 2 // Currently viewing job 2
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 20, Output: "Review for job 2", Job: &storage.ReviewJob{ID: 2}}
+
+	// Simulate a stale response arriving for job 1 (user navigated away)
+	staleMsg := tuiReviewMsg{
+		review: &storage.Review{ID: 10, Output: "Stale review for job 1", Job: &storage.ReviewJob{ID: 1}},
+		jobID:  1, // This doesn't match selectedJobID (2)
+	}
+
+	updated, _ := m.Update(staleMsg)
+	m2 := updated.(tuiModel)
+
+	// Should ignore the stale response
+	if m2.currentReview.Output != "Review for job 2" {
+		t.Errorf("Expected stale response to be ignored, got output: %s", m2.currentReview.Output)
+	}
+	if m2.currentReview.ID != 20 {
+		t.Errorf("Expected review ID to remain 20, got %d", m2.currentReview.ID)
+	}
+}
+
+func TestTUIReviewMsgWithMatchingJobID(t *testing.T) {
+	// Test that review responses with matching job ID are accepted
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+	m.currentView = tuiViewQueue // Still in queue view, waiting for fetch
+
+	validMsg := tuiReviewMsg{
+		review: &storage.Review{ID: 10, Output: "New review", Job: &storage.ReviewJob{ID: 1}},
+		jobID:  1,
+	}
+
+	updated, _ := m.Update(validMsg)
+	m2 := updated.(tuiModel)
+
+	// Should accept the response and switch to review view
+	if m2.currentView != tuiViewReview {
+		t.Errorf("Expected to switch to review view, got %d", m2.currentView)
+	}
+	if m2.currentReview == nil || m2.currentReview.Output != "New review" {
+		t.Error("Expected currentReview to be updated")
+	}
+	if m2.reviewScroll != 0 {
+		t.Errorf("Expected reviewScroll to be 0, got %d", m2.reviewScroll)
+	}
+}
+
+func TestTUISelectionSyncInReviewView(t *testing.T) {
+	// Test that selectedIdx syncs with currentReview.Job.ID when jobs refresh
+	m := newTuiModel("http://localhost")
+
+	// Initial state: viewing review for job 2
+	m.jobs = []storage.ReviewJob{
+		{ID: 3, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone},
+		{ID: 1, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 1
+	m.selectedJobID = 2
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 20, Job: &storage.ReviewJob{ID: 2}}
+
+	// New job arrives at the top, shifting indices
+	newJobs := tuiJobsMsg([]storage.ReviewJob{
+		{ID: 4, Status: storage.JobStatusDone}, // New job at top
+		{ID: 3, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone}, // Now at index 2
+		{ID: 1, Status: storage.JobStatusDone},
+	})
+
+	updated, _ := m.Update(newJobs)
+	m2 := updated.(tuiModel)
+
+	// selectedIdx should sync with currentReview.Job.ID (2), now at index 2
+	if m2.selectedIdx != 2 {
+		t.Errorf("Expected selectedIdx=2 (synced with review job), got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 2 {
+		t.Errorf("Expected selectedJobID=2, got %d", m2.selectedJobID)
+	}
+}
+
+func TestTUIQueueViewNavigationUpDown(t *testing.T) {
+	// Test up/down/j/k navigation in queue view
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusQueued},
+		{ID: 3, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 1
+	m.selectedJobID = 2
+	m.currentView = tuiViewQueue
+
+	// 'j' in queue view moves down (higher index)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m2 := updated.(tuiModel)
+
+	if m2.selectedIdx != 2 {
+		t.Errorf("j key: expected selectedIdx=2, got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 3 {
+		t.Errorf("j key: expected selectedJobID=3, got %d", m2.selectedJobID)
+	}
+
+	// 'k' in queue view moves up (lower index)
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m3 := updated.(tuiModel)
+
+	if m3.selectedIdx != 1 {
+		t.Errorf("k key: expected selectedIdx=1, got %d", m3.selectedIdx)
+	}
+}
+
+func TestTUIQueueViewArrowsMatchUpDown(t *testing.T) {
+	// Test that left/right in queue view work like k/j (up/down)
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone},
+		{ID: 3, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 1
+	m.selectedJobID = 2
+	m.currentView = tuiViewQueue
+
+	// 'left' in queue view should move down (like j)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m2 := updated.(tuiModel)
+
+	if m2.selectedIdx != 2 {
+		t.Errorf("Left arrow: expected selectedIdx=2, got %d", m2.selectedIdx)
+	}
+
+	// Reset
+	m2.selectedIdx = 1
+	m2.selectedJobID = 2
+
+	// 'right' in queue view should move up (like k)
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m3 := updated.(tuiModel)
+
+	if m3.selectedIdx != 0 {
+		t.Errorf("Right arrow: expected selectedIdx=0, got %d", m3.selectedIdx)
+	}
+}
+
+func TestTUIJobsRefreshDuringReviewNavigation(t *testing.T) {
+	// Test that jobs refresh during review navigation doesn't reset selection
+	// This tests the race condition fix: user navigates to job 3, but jobs refresh
+	// arrives before the review loads. Selection should stay on job 3, not revert
+	// to the currently displayed review's job (job 2).
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone},
+		{ID: 3, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 1
+	m.selectedJobID = 2
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 20, Output: "Review for job 2", Job: &storage.ReviewJob{ID: 2}}
+
+	// Simulate user navigating to next review (job 3)
+	// This updates selectedIdx and selectedJobID but doesn't update currentReview yet
+	m.selectedIdx = 2
+	m.selectedJobID = 3
+
+	// Before the review for job 3 arrives, a jobs refresh comes in
+	refreshedJobs := tuiJobsMsg([]storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone},
+		{ID: 3, Status: storage.JobStatusDone},
+	})
+
+	updated, _ := m.Update(refreshedJobs)
+	m2 := updated.(tuiModel)
+
+	// Selection should stay on job 3 (user's navigation intent), not revert to job 2
+	if m2.selectedJobID != 3 {
+		t.Errorf("Expected selectedJobID=3 (user's navigation), got %d", m2.selectedJobID)
+	}
+	if m2.selectedIdx != 2 {
+		t.Errorf("Expected selectedIdx=2 (job 3's index), got %d", m2.selectedIdx)
+	}
+
+	// currentReview should still be the old one (review for job 3 hasn't loaded)
+	if m2.currentReview.Job.ID != 2 {
+		t.Errorf("Expected currentReview to still be job 2, got job %d", m2.currentReview.Job.ID)
+	}
+
+	// Now when the review for job 3 arrives, it should be accepted
+	newReviewMsg := tuiReviewMsg{
+		review: &storage.Review{ID: 30, Output: "Review for job 3", Job: &storage.ReviewJob{ID: 3}},
+		jobID:  3,
+	}
+
+	updated, _ = m2.Update(newReviewMsg)
+	m3 := updated.(tuiModel)
+
+	if m3.currentReview.ID != 30 {
+		t.Errorf("Expected new review ID=30, got %d", m3.currentReview.ID)
+	}
+	if m3.currentReview.Output != "Review for job 3" {
+		t.Errorf("Expected new review output, got %s", m3.currentReview.Output)
+	}
+}
+
+func TestTUIEmptyRefreshWhileViewingReview(t *testing.T) {
+	// Test that transient empty jobs refresh doesn't break selection
+	// when viewing a review. Selection should restore to displayed review
+	// when jobs repopulate.
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone},
+		{ID: 3, Status: storage.JobStatusDone},
+	}
+	m.selectedIdx = 1
+	m.selectedJobID = 2
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 20, Output: "Review for job 2", Job: &storage.ReviewJob{ID: 2}}
+
+	// Transient empty refresh arrives
+	emptyJobs := tuiJobsMsg([]storage.ReviewJob{})
+
+	updated, _ := m.Update(emptyJobs)
+	m2 := updated.(tuiModel)
+
+	// selectedJobID should be preserved (not cleared) while viewing a review
+	if m2.selectedJobID != 2 {
+		t.Errorf("Expected selectedJobID=2 preserved during empty refresh, got %d", m2.selectedJobID)
+	}
+
+	// Jobs repopulate
+	repopulatedJobs := tuiJobsMsg([]storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone},
+		{ID: 3, Status: storage.JobStatusDone},
+	})
+
+	updated, _ = m2.Update(repopulatedJobs)
+	m3 := updated.(tuiModel)
+
+	// Selection should restore to job 2 (the displayed review)
+	if m3.selectedJobID != 2 {
+		t.Errorf("Expected selectedJobID=2 after repopulate, got %d", m3.selectedJobID)
+	}
+	if m3.selectedIdx != 1 {
+		t.Errorf("Expected selectedIdx=1 (job 2's index), got %d", m3.selectedIdx)
+	}
+}
+
+func TestTUIEmptyRefreshSeedsFromCurrentReview(t *testing.T) {
+	// Test that if selectedJobID somehow becomes 0 while viewing a review,
+	// it gets seeded from the current review when jobs repopulate
+	m := newTuiModel("http://localhost")
+
+	m.jobs = []storage.ReviewJob{}
+	m.selectedIdx = 0
+	m.selectedJobID = 0 // Somehow cleared
+	m.currentView = tuiViewReview
+	m.currentReview = &storage.Review{ID: 20, Output: "Review for job 2", Job: &storage.ReviewJob{ID: 2}}
+
+	// Jobs repopulate
+	repopulatedJobs := tuiJobsMsg([]storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone},
+		{ID: 2, Status: storage.JobStatusDone},
+		{ID: 3, Status: storage.JobStatusDone},
+	})
+
+	updated, _ := m.Update(repopulatedJobs)
+	m2 := updated.(tuiModel)
+
+	// Selection should be seeded from currentReview.Job.ID
+	if m2.selectedJobID != 2 {
+		t.Errorf("Expected selectedJobID=2 (seeded from currentReview), got %d", m2.selectedJobID)
+	}
+	if m2.selectedIdx != 1 {
+		t.Errorf("Expected selectedIdx=1 (job 2's index), got %d", m2.selectedIdx)
+	}
+}

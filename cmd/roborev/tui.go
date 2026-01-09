@@ -88,7 +88,10 @@ type tuiModel struct {
 type tuiTickMsg time.Time
 type tuiJobsMsg []storage.ReviewJob
 type tuiStatusMsg storage.DaemonStatus
-type tuiReviewMsg *storage.Review
+type tuiReviewMsg struct {
+	review *storage.Review
+	jobID  int64 // The job ID that was requested (for race condition detection)
+}
 type tuiPromptMsg *storage.Review
 type tuiAddressedMsg bool
 type tuiAddressedResultMsg struct {
@@ -250,7 +253,7 @@ func (m tuiModel) fetchReview(jobID int64) tea.Cmd {
 		if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
 			return tuiErrMsg(err)
 		}
-		return tuiReviewMsg(&review)
+		return tuiReviewMsg{review: &review, jobID: jobID}
 	}
 }
 
@@ -438,6 +441,32 @@ func (m *tuiModel) setJobFinishedAt(jobID int64, finishedAt *time.Time) {
 			return
 		}
 	}
+}
+
+// findNextViewableJob finds the next job that can be viewed (done or failed).
+// Respects active filter. Returns the index or -1 if none found.
+func (m *tuiModel) findNextViewableJob() int {
+	for i := m.selectedIdx + 1; i < len(m.jobs); i++ {
+		job := m.jobs[i]
+		if (job.Status == storage.JobStatusDone || job.Status == storage.JobStatusFailed) &&
+			(m.activeRepoFilter == "" || job.RepoPath == m.activeRepoFilter) {
+			return i
+		}
+	}
+	return -1
+}
+
+// findPrevViewableJob finds the previous job that can be viewed (done or failed).
+// Respects active filter. Returns the index or -1 if none found.
+func (m *tuiModel) findPrevViewableJob() int {
+	for i := m.selectedIdx - 1; i >= 0; i-- {
+		job := m.jobs[i]
+		if (job.Status == storage.JobStatusDone || job.Status == storage.JobStatusFailed) &&
+			(m.activeRepoFilter == "" || job.RepoPath == m.activeRepoFilter) {
+			return i
+		}
+	}
+	return -1
 }
 
 // cancelJob sends a cancel request to the server
@@ -656,7 +685,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 
-		case "up", "k":
+		case "up":
 			if m.currentView == tuiViewQueue {
 				// Navigate to previous visible job (respects filter)
 				prevIdx := m.findPrevVisibleJob(m.selectedIdx)
@@ -674,7 +703,39 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case "down", "j":
+		case "k", "right":
+			if m.currentView == tuiViewQueue {
+				// Navigate to previous visible job (respects filter)
+				prevIdx := m.findPrevVisibleJob(m.selectedIdx)
+				if prevIdx >= 0 {
+					m.selectedIdx = prevIdx
+					m.updateSelectedJobID()
+				}
+			} else if m.currentView == tuiViewReview {
+				// Navigate to previous review (lower index)
+				prevIdx := m.findPrevViewableJob()
+				if prevIdx >= 0 {
+					m.selectedIdx = prevIdx
+					m.updateSelectedJobID()
+					m.reviewScroll = 0
+					job := m.jobs[prevIdx]
+					if job.Status == storage.JobStatusDone {
+						return m, m.fetchReview(job.ID)
+					} else if job.Status == storage.JobStatusFailed {
+						m.currentReview = &storage.Review{
+							Agent:  job.Agent,
+							Output: "Job failed:\n\n" + job.Error,
+							Job:    &job,
+						}
+					}
+				}
+			} else if m.currentView == tuiViewPrompt {
+				if m.promptScroll > 0 {
+					m.promptScroll--
+				}
+			}
+
+		case "down":
 			if m.currentView == tuiViewQueue {
 				// Navigate to next visible job (respects filter)
 				nextIdx := m.findNextVisibleJob(m.selectedIdx)
@@ -684,6 +745,36 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.currentView == tuiViewReview {
 				m.reviewScroll++
+			} else if m.currentView == tuiViewPrompt {
+				m.promptScroll++
+			}
+
+		case "j", "left":
+			if m.currentView == tuiViewQueue {
+				// Navigate to next visible job (respects filter)
+				nextIdx := m.findNextVisibleJob(m.selectedIdx)
+				if nextIdx >= 0 {
+					m.selectedIdx = nextIdx
+					m.updateSelectedJobID()
+				}
+			} else if m.currentView == tuiViewReview {
+				// Navigate to next review (higher index)
+				nextIdx := m.findNextViewableJob()
+				if nextIdx >= 0 {
+					m.selectedIdx = nextIdx
+					m.updateSelectedJobID()
+					m.reviewScroll = 0
+					job := m.jobs[nextIdx]
+					if job.Status == storage.JobStatusDone {
+						return m, m.fetchReview(job.ID)
+					} else if job.Status == storage.JobStatusFailed {
+						m.currentReview = &storage.Review{
+							Agent:  job.Agent,
+							Output: "Job failed:\n\n" + job.Error,
+							Job:    &job,
+						}
+					}
+				}
 			} else if m.currentView == tuiViewPrompt {
 				m.promptScroll++
 			}
@@ -861,9 +952,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if len(m.jobs) == 0 {
 			m.selectedIdx = -1
-			m.selectedJobID = 0
+			// Only clear selectedJobID if not viewing a review - preserves
+			// selection through transient empty refreshes
+			if m.currentView != tuiViewReview || m.currentReview == nil || m.currentReview.Job == nil {
+				m.selectedJobID = 0
+			}
 		} else if m.selectedJobID > 0 {
-			// Try to find the previously selected job by ID
+			// Try to find the selected job by ID - this preserves the user's
+			// selection even if they've navigated to a new review that hasn't
+			// loaded yet (selectedJobID tracks intent, currentReview is display)
 			found := false
 			for i, job := range m.jobs {
 				if job.ID == m.selectedJobID {
@@ -905,6 +1002,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+		} else if m.currentView == tuiViewReview && m.currentReview != nil && m.currentReview.Job != nil {
+			// selectedJobID is 0 but we're viewing a review - seed from current review
+			// (can happen after transient empty refresh cleared selectedJobID)
+			targetID := m.currentReview.Job.ID
+			for i, job := range m.jobs {
+				if job.ID == targetID {
+					m.selectedIdx = i
+					m.selectedJobID = targetID
+					break
+				}
+			}
+			// If not found, fall through to select first job
+			if m.selectedJobID == 0 {
+				m.selectedIdx = 0
+				m.selectedJobID = m.jobs[0].ID
+			}
 		} else {
 			// No job was selected yet, select first visible job
 			firstVisible := m.findFirstVisibleJob()
@@ -932,7 +1045,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateAvailable = string(msg)
 
 	case tuiReviewMsg:
-		m.currentReview = msg
+		// Ignore stale responses from rapid navigation
+		if msg.jobID != m.selectedJobID {
+			return m, nil
+		}
+		m.currentReview = msg.review
 		m.currentView = tuiViewReview
 		m.reviewScroll = 0
 
@@ -1260,7 +1377,15 @@ func (m tuiModel) renderReviewView() string {
 		if review.Addressed {
 			addressedStr = " [ADDRESSED]"
 		}
-		title := fmt.Sprintf("Review: %s (%s)%s", ref, review.Agent, addressedStr)
+		idStr := ""
+		if review.ID > 0 {
+			idStr = fmt.Sprintf("#%d ", review.ID)
+		}
+		repoStr := ""
+		if review.Job.RepoName != "" {
+			repoStr = review.Job.RepoName + " "
+		}
+		title := fmt.Sprintf("Review %s%s%s (%s)%s", idStr, repoStr, ref, review.Agent, addressedStr)
 		b.WriteString(tuiTitleStyle.Render(title))
 	} else {
 		b.WriteString(tuiTitleStyle.Render("Review"))
@@ -1291,7 +1416,7 @@ func (m tuiModel) renderReviewView() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(tuiHelpStyle.Render("up/down: scroll | a: toggle addressed | p: view prompt | esc/q: back"))
+	b.WriteString(tuiHelpStyle.Render("up/down: scroll | j/left: prev | k/right: next | a: addressed | p: prompt | esc/q: back"))
 
 	return b.String()
 }
