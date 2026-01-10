@@ -29,8 +29,7 @@ If you find issues, list them with:
 - File and line reference where possible
 - A brief explanation of the problem and suggested fix
 
-If you find no issues, confirm you checked for bugs, security issues, testing gaps,
-regressions, and code quality concerns, then briefly summarize what the commit does.`
+If you find no issues, state "No issues found." then briefly summarize what the commit does.`
 
 // SystemPromptRange is the base instruction for commit range reviews
 const SystemPromptRange = `You are a code reviewer. Review the git commit range shown below for:
@@ -48,8 +47,7 @@ If you find issues, list them with:
 - File and line reference where possible
 - A brief explanation of the problem and suggested fix
 
-If you find no issues, confirm you checked for bugs, security issues, testing gaps,
-regressions, and code quality concerns, then briefly summarize what the commits do.`
+If you find no issues, state "No issues found." then briefly summarize what the commits do.`
 
 // PreviousReviewsHeader introduces the previous reviews section
 const PreviousReviewsHeader = `

@@ -45,10 +45,11 @@ type ReviewJob struct {
 	RetryCount int        `json:"retry_count"`
 
 	// Joined fields for convenience
-	RepoPath      string `json:"repo_path,omitempty"`
-	RepoName      string `json:"repo_name,omitempty"`
-	CommitSubject string `json:"commit_subject,omitempty"` // empty for ranges
-	Addressed     *bool  `json:"addressed,omitempty"`      // nil if no review yet
+	RepoPath      string  `json:"repo_path,omitempty"`
+	RepoName      string  `json:"repo_name,omitempty"`
+	CommitSubject string  `json:"commit_subject,omitempty"` // empty for ranges
+	Addressed     *bool   `json:"addressed,omitempty"`      // nil if no review yet
+	Verdict       *string `json:"verdict,omitempty"`        // P/F parsed from review output
 }
 
 type Review struct {

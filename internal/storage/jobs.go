@@ -6,6 +6,18 @@ import (
 	"time"
 )
 
+// parseVerdict extracts P (pass) or F (fail) from review output.
+// Returns "P" only if clear positive indicators found, "F" otherwise.
+func parseVerdict(output string) string {
+	lower := strings.ToLower(output)
+	if strings.Contains(lower, "no issues found") ||
+		strings.Contains(lower, "no issues") ||
+		strings.Contains(lower, "no findings") {
+		return "P"
+	}
+	return "F"
+}
+
 // parseSQLiteTime parses a time string from SQLite which may be in different formats
 func parseSQLiteTime(s string) time.Time {
 	// Try RFC3339 first (what we write for started_at, finished_at)
@@ -234,7 +246,7 @@ func (db *DB) ListJobs(statusFilter string, repoFilter string, limit, offset int
 	query := `
 		SELECT j.id, j.repo_id, j.commit_id, j.git_ref, j.agent, j.status, j.enqueued_at,
 		       j.started_at, j.finished_at, j.worker_id, j.error, j.prompt, j.retry_count,
-		       r.root_path, r.name, c.subject, rv.addressed
+		       r.root_path, r.name, c.subject, rv.addressed, rv.output
 		FROM review_jobs j
 		JOIN repos r ON r.id = j.repo_id
 		LEFT JOIN commits c ON c.id = j.commit_id
@@ -278,14 +290,14 @@ func (db *DB) ListJobs(statusFilter string, repoFilter string, limit, offset int
 	for rows.Next() {
 		var j ReviewJob
 		var enqueuedAt string
-		var startedAt, finishedAt, workerID, errMsg, prompt sql.NullString
+		var startedAt, finishedAt, workerID, errMsg, prompt, output sql.NullString
 		var commitID sql.NullInt64
 		var commitSubject sql.NullString
 		var addressed sql.NullInt64
 
 		err := rows.Scan(&j.ID, &j.RepoID, &commitID, &j.GitRef, &j.Agent, &j.Status, &enqueuedAt,
 			&startedAt, &finishedAt, &workerID, &errMsg, &prompt, &j.RetryCount,
-			&j.RepoPath, &j.RepoName, &commitSubject, &addressed)
+			&j.RepoPath, &j.RepoName, &commitSubject, &addressed, &output)
 		if err != nil {
 			return nil, err
 		}
@@ -317,6 +329,10 @@ func (db *DB) ListJobs(statusFilter string, repoFilter string, limit, offset int
 		if addressed.Valid {
 			val := addressed.Int64 != 0
 			j.Addressed = &val
+		}
+		if output.Valid {
+			verdict := parseVerdict(output.String)
+			j.Verdict = &verdict
 		}
 
 		jobs = append(jobs, j)

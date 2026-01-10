@@ -38,6 +38,9 @@ var (
 	tuiFailedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // Red
 	tuiCanceledStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // Orange
 
+	tuiPassStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))  // Green
+	tuiFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // Red
+
 	tuiHelpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241"))
 )
@@ -1268,12 +1271,12 @@ func (m tuiModel) renderQueueView() string {
 		colWidths := m.calculateColumnWidths(idWidth)
 
 		// Header (with 2-char prefix to align with row selector)
-		header := fmt.Sprintf("  %-*s %-*s %-*s %-*s %-10s %-12s %-8s %s",
+		header := fmt.Sprintf("  %-*s %-*s %-*s %-*s %-10s %-3s %-12s %-8s %s",
 			idWidth, "ID",
 			colWidths.ref, "Ref",
 			colWidths.repo, "Repo",
 			colWidths.agent, "Agent",
-			"Status", "Queued", "Elapsed", "Addr'd")
+			"Status", "P/F", "Queued", "Elapsed", "Addr'd")
 		b.WriteString(tuiStatusStyle.Render(header))
 		b.WriteString("\n")
 		b.WriteString("  " + strings.Repeat("-", min(m.width-4, 200)))
@@ -1362,9 +1365,9 @@ type columnWidths struct {
 }
 
 func (m tuiModel) calculateColumnWidths(idWidth int) columnWidths {
-	// Fixed widths: ID (idWidth), Status (10), Queued (12), Elapsed (8), Addr'd (6)
-	// Plus spacing: 2 (prefix) + 7 spaces between columns
-	fixedWidth := 2 + idWidth + 10 + 12 + 8 + 6 + 7
+	// Fixed widths: ID (idWidth), Status (10), P/F (3), Queued (12), Elapsed (8), Addr'd (6)
+	// Plus spacing: 2 (prefix) + 8 spaces between columns
+	fixedWidth := 2 + idWidth + 10 + 3 + 12 + 8 + 6 + 8
 
 	// Available width for flexible columns (ref, repo, agent)
 	// Don't artificially inflate - if terminal is too narrow, columns will be tiny
@@ -1462,6 +1465,23 @@ func (m tuiModel) renderJobLine(job storage.ReviewJob, selected bool, idWidth in
 		styledStatus += strings.Repeat(" ", padding)
 	}
 
+	// Verdict: P (pass) or F (fail), styled with color
+	verdict := "-"
+	if job.Verdict != nil {
+		v := *job.Verdict
+		if selected {
+			verdict = v
+		} else if v == "P" {
+			verdict = tuiPassStyle.Render(v)
+		} else {
+			verdict = tuiFailStyle.Render(v)
+		}
+	}
+	// Pad to 3 chars
+	if job.Verdict == nil || len(*job.Verdict) < 3 {
+		verdict += strings.Repeat(" ", 3-1) // "-" or "P"/"F" is 1 char
+	}
+
 	// Addressed status: nil means no review yet, true/false for reviewed jobs
 	addr := ""
 	if job.Addressed != nil {
@@ -1472,12 +1492,12 @@ func (m tuiModel) renderJobLine(job storage.ReviewJob, selected bool, idWidth in
 		}
 	}
 
-	return fmt.Sprintf("%-*d %-*s %-*s %-*s %s %-12s %-8s %s",
+	return fmt.Sprintf("%-*d %-*s %-*s %-*s %s %s %-12s %-8s %s",
 		idWidth, job.ID,
 		colWidths.ref, ref,
 		colWidths.repo, repo,
 		colWidths.agent, agent,
-		styledStatus, enqueued, elapsed, addr)
+		styledStatus, verdict, enqueued, elapsed, addr)
 }
 
 // wrapText wraps text to the specified width, preserving existing line breaks
