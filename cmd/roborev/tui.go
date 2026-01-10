@@ -80,8 +80,9 @@ type tuiModel struct {
 	updateAvailable string // Latest version if update available, empty if up to date
 
 	// Pagination state
-	hasMore       bool // true if there are more jobs to load
-	loadingMore   bool // true if currently loading more jobs
+	hasMore        bool // true if there are more jobs to load
+	loadingMore    bool // true if currently loading more jobs
+	heightDetected bool // true after first WindowSizeMsg (real terminal height known)
 
 	// Filter modal state
 	filterRepos       []repoFilterItem // Available repos with counts
@@ -157,8 +158,11 @@ func (m tuiModel) tick() tea.Cmd {
 func (m tuiModel) fetchJobs() tea.Cmd {
 	// Calculate limit based on terminal height - fetch enough to fill the visible area
 	// Reserve 9 lines for header/footer, add buffer for safety
-	// Use minimum of 100 to handle tall terminals before we know the actual height
-	visibleRows := max(100, m.height-9+10)
+	// Use minimum of 100 only before first WindowSizeMsg (when height is default 24)
+	visibleRows := m.height - 9 + 10
+	if !m.heightDetected {
+		visibleRows = max(100, visibleRows)
+	}
 	currentJobCount := len(m.jobs)
 
 	return func() tea.Msg {
@@ -1014,16 +1018,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
-		oldHeight := m.height
+		wasHeightDetected := m.heightDetected
 		m.width = msg.Width
 		m.height = msg.Height
+		m.heightDetected = true
 
-		// If height increased significantly and we have room for more jobs, re-fetch
-		// This handles the initial startup where first fetch uses default height (24)
-		oldVisibleRows := max(100, oldHeight-9+10)
-		newVisibleRows := max(100, m.height-9+10)
-		if newVisibleRows > oldVisibleRows && len(m.jobs) > 0 && m.hasMore && m.activeRepoFilter == "" {
-			return m, m.fetchJobs()
+		// If this is the first resize and we can show more jobs, re-fetch to fill screen
+		// Gate on !loadingMore to avoid race conditions with pagination in flight
+		if !wasHeightDetected && !m.loadingMore && len(m.jobs) > 0 && m.hasMore && m.activeRepoFilter == "" {
+			// Check if new height allows more rows than initial fetch provided
+			newVisibleRows := m.height - 9 + 10
+			if newVisibleRows > len(m.jobs) {
+				return m, m.fetchJobs()
+			}
 		}
 
 	case tuiTickMsg:
