@@ -91,6 +91,7 @@ type tuiModel struct {
 
 	// Active filter (applied to queue view)
 	activeRepoFilter string // Empty = show all, otherwise repo root_path to filter by
+	hideAddressed    bool   // When true, hide jobs with addressed reviews
 }
 
 type tuiTickMsg time.Time
@@ -503,12 +504,12 @@ func (m *tuiModel) setJobFinishedAt(jobID int64, finishedAt *time.Time) {
 }
 
 // findNextViewableJob finds the next job that can be viewed (done or failed).
-// Respects active filter. Returns the index or -1 if none found.
+// Respects active filters. Returns the index or -1 if none found.
 func (m *tuiModel) findNextViewableJob() int {
 	for i := m.selectedIdx + 1; i < len(m.jobs); i++ {
 		job := m.jobs[i]
 		if (job.Status == storage.JobStatusDone || job.Status == storage.JobStatusFailed) &&
-			(m.activeRepoFilter == "" || job.RepoPath == m.activeRepoFilter) {
+			m.isJobVisible(job) {
 			return i
 		}
 	}
@@ -516,12 +517,12 @@ func (m *tuiModel) findNextViewableJob() int {
 }
 
 // findPrevViewableJob finds the previous job that can be viewed (done or failed).
-// Respects active filter. Returns the index or -1 if none found.
+// Respects active filters. Returns the index or -1 if none found.
 func (m *tuiModel) findPrevViewableJob() int {
 	for i := m.selectedIdx - 1; i >= 0; i-- {
 		job := m.jobs[i]
 		if (job.Status == storage.JobStatusDone || job.Status == storage.JobStatusFailed) &&
-			(m.activeRepoFilter == "" || job.RepoPath == m.activeRepoFilter) {
+			m.isJobVisible(job) {
 			return i
 		}
 	}
@@ -593,14 +594,31 @@ func (m *tuiModel) getSelectedFilterRepo() *repoFilterItem {
 	return nil
 }
 
-// getVisibleJobs returns jobs filtered by the active repo filter
+// isJobVisible checks if a job passes all active filters
+func (m tuiModel) isJobVisible(job storage.ReviewJob) bool {
+	if m.activeRepoFilter != "" && job.RepoPath != m.activeRepoFilter {
+		return false
+	}
+	if m.hideAddressed {
+		// Hide addressed reviews and failed jobs
+		if job.Addressed != nil && *job.Addressed {
+			return false
+		}
+		if job.Status == storage.JobStatusFailed {
+			return false
+		}
+	}
+	return true
+}
+
+// getVisibleJobs returns jobs filtered by active filters (repo, addressed)
 func (m tuiModel) getVisibleJobs() []storage.ReviewJob {
-	if m.activeRepoFilter == "" {
+	if m.activeRepoFilter == "" && !m.hideAddressed {
 		return m.jobs
 	}
 	var visible []storage.ReviewJob
 	for _, job := range m.jobs {
-		if job.RepoPath == m.activeRepoFilter {
+		if m.isJobVisible(job) {
 			visible = append(visible, job)
 		}
 	}
@@ -613,12 +631,12 @@ func (m tuiModel) getVisibleSelectedIdx() int {
 	if m.selectedIdx < 0 {
 		return -1
 	}
-	if m.activeRepoFilter == "" {
+	if m.activeRepoFilter == "" && !m.hideAddressed {
 		return m.selectedIdx
 	}
 	count := 0
 	for i, job := range m.jobs {
-		if job.RepoPath == m.activeRepoFilter {
+		if m.isJobVisible(job) {
 			if i == m.selectedIdx {
 				return count
 			}
@@ -628,42 +646,42 @@ func (m tuiModel) getVisibleSelectedIdx() int {
 	return -1
 }
 
-// findNextVisibleJob finds the next job index in m.jobs that matches the filter
+// findNextVisibleJob finds the next job index in m.jobs that matches active filters
 // Returns -1 if no next visible job exists
 func (m tuiModel) findNextVisibleJob(currentIdx int) int {
 	for i := currentIdx + 1; i < len(m.jobs); i++ {
-		if m.activeRepoFilter == "" || m.jobs[i].RepoPath == m.activeRepoFilter {
+		if m.isJobVisible(m.jobs[i]) {
 			return i
 		}
 	}
 	return -1
 }
 
-// findPrevVisibleJob finds the previous job index in m.jobs that matches the filter
+// findPrevVisibleJob finds the previous job index in m.jobs that matches active filters
 // Returns -1 if no previous visible job exists
 func (m tuiModel) findPrevVisibleJob(currentIdx int) int {
 	for i := currentIdx - 1; i >= 0; i-- {
-		if m.activeRepoFilter == "" || m.jobs[i].RepoPath == m.activeRepoFilter {
+		if m.isJobVisible(m.jobs[i]) {
 			return i
 		}
 	}
 	return -1
 }
 
-// findFirstVisibleJob finds the first job index that matches the filter
+// findFirstVisibleJob finds the first job index that matches active filters
 func (m tuiModel) findFirstVisibleJob() int {
 	for i, job := range m.jobs {
-		if m.activeRepoFilter == "" || job.RepoPath == m.activeRepoFilter {
+		if m.isJobVisible(job) {
 			return i
 		}
 	}
 	return -1
 }
 
-// findLastVisibleJob finds the last job index that matches the filter
+// findLastVisibleJob finds the last job index that matches active filters
 func (m tuiModel) findLastVisibleJob() int {
 	for i := len(m.jobs) - 1; i >= 0; i-- {
-		if m.activeRepoFilter == "" || m.jobs[i].RepoPath == m.activeRepoFilter {
+		if m.isJobVisible(m.jobs[i]) {
 			return i
 		}
 	}
@@ -961,6 +979,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					oldState := *job.Addressed
 					newState := !oldState
 					*job.Addressed = newState // Optimistic update
+					// If hiding addressed and we just marked as addressed, move to next visible job
+					if m.hideAddressed && newState {
+						nextIdx := m.findNextVisibleJob(m.selectedIdx)
+						if nextIdx < 0 {
+							nextIdx = m.findPrevVisibleJob(m.selectedIdx)
+						}
+						if nextIdx < 0 {
+							nextIdx = m.findFirstVisibleJob()
+						}
+						if nextIdx >= 0 {
+							m.selectedIdx = nextIdx
+							m.updateSelectedJobID()
+						}
+					}
 					return m, m.addressReviewInBackground(job.ID, newState, oldState)
 				}
 			}
@@ -989,11 +1021,31 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.fetchRepos()
 			}
 
+		case "h":
+			// Toggle hide addressed
+			if m.currentView == tuiViewQueue {
+				m.hideAddressed = !m.hideAddressed
+				// Ensure selection is on a visible job after toggle
+				if len(m.jobs) > 0 {
+					if m.selectedIdx < 0 || m.selectedIdx >= len(m.jobs) || !m.isJobVisible(m.jobs[m.selectedIdx]) {
+						// Selection invalid or hidden, move to first visible
+						m.selectedIdx = m.findFirstVisibleJob()
+						m.updateSelectedJobID()
+					}
+					// Verify getVisibleSelectedIdx will find this job
+					if m.getVisibleSelectedIdx() < 0 && m.findFirstVisibleJob() >= 0 {
+						m.selectedIdx = m.findFirstVisibleJob()
+						m.updateSelectedJobID()
+					}
+				}
+			}
+
 		case "esc":
-			if m.currentView == tuiViewQueue && m.activeRepoFilter != "" {
-				// Clear filter and refetch all jobs
+			if m.currentView == tuiViewQueue && (m.activeRepoFilter != "" || m.hideAddressed) {
+				// Clear filters and refetch all jobs
 				m.activeRepoFilter = ""
-				// Reset to default 50-job view (clear jobs so fetchJobs uses limit=50)
+				m.hideAddressed = false
+				// Reset to default view (clear jobs so fetchJobs uses appropriate limit)
 				m.jobs = nil
 				m.hasMore = false
 				// Invalidate selection until refetch completes
@@ -1228,10 +1280,13 @@ func (m tuiModel) View() string {
 func (m tuiModel) renderQueueView() string {
 	var b strings.Builder
 
-	// Title with version, optional update notification, and filter indicator
+	// Title with version, optional update notification, and filter indicators
 	title := fmt.Sprintf("RoboRev Queue (%s)", version.Version)
 	if m.activeRepoFilter != "" {
 		title += fmt.Sprintf(" [f: %s]", filepath.Base(m.activeRepoFilter))
+	}
+	if m.hideAddressed {
+		title += " [hiding addressed]"
 	}
 	b.WriteString(tuiTitleStyle.Render(title))
 	b.WriteString("\n")
@@ -1272,8 +1327,8 @@ func (m tuiModel) renderQueueView() string {
 	visibleSelectedIdx := m.getVisibleSelectedIdx()
 
 	if len(visibleJobList) == 0 {
-		if m.activeRepoFilter != "" {
-			b.WriteString("No jobs matching filter\n")
+		if m.activeRepoFilter != "" || m.hideAddressed {
+			b.WriteString("No jobs matching filters\n")
 		} else {
 			b.WriteString("No jobs in queue\n")
 		}
@@ -1368,10 +1423,10 @@ func (m tuiModel) renderQueueView() string {
 	}
 
 	// Help (two lines)
-	helpText := "up/down/pgup/pgdn: navigate | enter: review | p: prompt | f: filter | q: quit\n" +
+	helpText := "up/down/pgup/pgdn: navigate | enter: review | p: prompt | f: filter | h: hide addressed | q: quit\n" +
 		"a: toggle addressed | x: cancel running/queued job"
-	if m.activeRepoFilter != "" {
-		helpText += " | esc: clear filter"
+	if m.activeRepoFilter != "" || m.hideAddressed {
+		helpText += " | esc: clear filters"
 	}
 	b.WriteString(tuiHelpStyle.Render(helpText))
 
