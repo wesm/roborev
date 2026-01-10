@@ -49,6 +49,16 @@ func TestParseVerdict(t *testing.T) {
 			output: "No findings to report.",
 			want:   "P",
 		},
+		{
+			name:   "bullet no issues found",
+			output: "- No issues found.",
+			want:   "P",
+		},
+		{
+			name:   "asterisk bullet no issues",
+			output: "* No issues found.",
+			want:   "P",
+		},
 
 		// Fail cases - findings present or ambiguous
 		{
@@ -79,6 +89,21 @@ func TestParseVerdict(t *testing.T) {
 		{
 			name:   "findings before no issues mention",
 			output: "Medium - Security issue\nOtherwise no issues found.",
+			want:   "F",
+		},
+		{
+			name:   "no issues found but caveat",
+			output: "No issues found in module X, but Y needs fixing.",
+			want:   "F",
+		},
+		{
+			name:   "no issues found however caveat",
+			output: "No issues found, however consider refactoring.",
+			want:   "F",
+		},
+		{
+			name:   "no issues found except caveat",
+			output: "No issues found except for minor style issues.",
 			want:   "F",
 		},
 	}

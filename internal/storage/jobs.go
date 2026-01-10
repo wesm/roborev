@@ -8,14 +8,25 @@ import (
 
 // parseVerdict extracts P (pass) or F (fail) from review output.
 // Returns "P" only if a clear pass indicator appears at the start of a line.
-// This avoids false positives from phrases like "No issues with X, but..."
+// Rejects lines containing caveats like "but", "however", "except".
 func parseVerdict(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(strings.ToLower(line))
+		// Strip leading bullet markers
+		trimmed = strings.TrimPrefix(trimmed, "- ")
+		trimmed = strings.TrimPrefix(trimmed, "* ")
+		trimmed = strings.TrimSpace(trimmed)
+
 		if strings.HasPrefix(trimmed, "no issues found") ||
 			strings.HasPrefix(trimmed, "no issues.") ||
 			strings.HasPrefix(trimmed, "no findings") ||
 			trimmed == "no issues" {
+			// Reject if line contains caveats
+			if strings.Contains(trimmed, " but ") ||
+				strings.Contains(trimmed, " however") ||
+				strings.Contains(trimmed, " except") {
+				continue
+			}
 			return "P"
 		}
 	}
