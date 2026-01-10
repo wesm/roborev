@@ -54,18 +54,27 @@ func stripListMarker(s string) string {
 	return s
 }
 
-// hasCaveat checks if the line contains contrastive words
+// hasCaveat checks if the line contains contrastive words or additional sentences with issues
 func hasCaveat(s string) bool {
 	// Normalize punctuation that could replace spaces
 	normalized := strings.ReplaceAll(s, "—", " ")
 	normalized = strings.ReplaceAll(normalized, "–", " ")
 	normalized = strings.ReplaceAll(normalized, ",", " ")
+	normalized = strings.ReplaceAll(normalized, ";", " ")
 
 	words := strings.Fields(normalized)
 	for _, w := range words {
 		// Strip trailing punctuation for word matching
 		w = strings.TrimRight(w, ".,;:!?")
+		// Contrastive words
 		if w == "but" || w == "however" || w == "except" {
+			return true
+		}
+		// Negative indicators that suggest problems
+		if w == "fail" || w == "fails" || w == "failed" || w == "failing" ||
+			w == "break" || w == "breaks" || w == "broken" ||
+			w == "crash" || w == "crashes" || w == "panic" ||
+			w == "error" || w == "errors" || w == "bug" || w == "bugs" {
 			return true
 		}
 	}

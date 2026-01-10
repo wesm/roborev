@@ -141,6 +141,31 @@ func TestParseVerdict(t *testing.T) {
 			output: "No issues found, but consider refactoring.",
 			want:   "F",
 		},
+		{
+			name:   "no issues with semicolon then failure",
+			output: "No issues with this change; tests failed.",
+			want:   "F",
+		},
+		{
+			name:   "no issues then second sentence with break",
+			output: "No issues with this change. It breaks X.",
+			want:   "F",
+		},
+		{
+			name:   "no issues then crash",
+			output: "No issues with this change—panic on start.",
+			want:   "F",
+		},
+		{
+			name:   "no issues then error",
+			output: "No issues with lint. Error in tests.",
+			want:   "F",
+		},
+		{
+			name:   "no issues then bug mention",
+			output: "No issues found. Bug in production.",
+			want:   "F",
+		},
 	}
 
 	for _, tt := range tests {
