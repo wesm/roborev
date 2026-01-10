@@ -79,6 +79,11 @@ func TestParseVerdict(t *testing.T) {
 			output: "-   No issues found.",
 			want:   "P",
 		},
+		{
+			name:   "large numbered list",
+			output: "100. No issues found.",
+			want:   "P",
+		},
 
 		// Fail cases - findings present or ambiguous
 		{
@@ -164,6 +169,16 @@ func TestParseVerdict(t *testing.T) {
 		{
 			name:   "no issues then bug mention",
 			output: "No issues found. Bug in production.",
+			want:   "F",
+		},
+		{
+			name:   "parenthesized but caveat",
+			output: "No issues found (but needs review).",
+			want:   "F",
+		},
+		{
+			name:   "quoted caveat",
+			output: "No issues found \"but\" consider refactoring.",
 			want:   "F",
 		},
 	}

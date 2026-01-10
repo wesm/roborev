@@ -32,7 +32,7 @@ func parseVerdict(output string) string {
 
 // stripListMarker removes leading bullet/number markers from a line
 func stripListMarker(s string) string {
-	// Handle: "- ", "* ", "1. ", "2) ", etc.
+	// Handle: "- ", "* ", "1. ", "99) ", "100. ", etc.
 	s = strings.TrimSpace(s)
 	if len(s) == 0 {
 		return s
@@ -41,12 +41,12 @@ func stripListMarker(s string) string {
 	if s[0] == '-' || s[0] == '*' {
 		return strings.TrimSpace(s[1:])
 	}
-	// Check for numbered lists (e.g., "1.", "1)", "1:")
-	for i := 0; i < len(s) && i < 3; i++ {
+	// Check for numbered lists - scan all leading digits
+	for i := 0; i < len(s); i++ {
 		if s[i] >= '0' && s[i] <= '9' {
 			continue
 		}
-		if s[i] == '.' || s[i] == ')' || s[i] == ':' {
+		if i > 0 && (s[i] == '.' || s[i] == ')' || s[i] == ':') {
 			return strings.TrimSpace(s[i+1:])
 		}
 		break
@@ -64,8 +64,8 @@ func hasCaveat(s string) bool {
 
 	words := strings.Fields(normalized)
 	for _, w := range words {
-		// Strip trailing punctuation for word matching
-		w = strings.TrimRight(w, ".,;:!?")
+		// Strip punctuation from both sides for word matching
+		w = strings.Trim(w, ".,;:!?()[]\"'")
 		// Contrastive words
 		if w == "but" || w == "however" || w == "except" {
 			return true
