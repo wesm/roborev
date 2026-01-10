@@ -63,18 +63,30 @@ func hasCaveat(s string) bool {
 	normalized = strings.ReplaceAll(normalized, ";", " ")
 
 	words := strings.Fields(normalized)
-	for _, w := range words {
+	for i, w := range words {
 		// Strip punctuation from both sides for word matching
 		w = strings.Trim(w, ".,;:!?()[]\"'")
 		// Contrastive words
 		if w == "but" || w == "however" || w == "except" {
 			return true
 		}
-		// Negative indicators that suggest problems
+		// Negative indicators that suggest problems (unless negated)
 		if w == "fail" || w == "fails" || w == "failed" || w == "failing" ||
 			w == "break" || w == "breaks" || w == "broken" ||
 			w == "crash" || w == "crashes" || w == "panic" ||
 			w == "error" || w == "errors" || w == "bug" || w == "bugs" {
+			// Check if preceded by negation (within 2 words)
+			negated := false
+			for j := max(0, i-2); j < i; j++ {
+				prev := strings.Trim(words[j], ".,;:!?()[]\"'")
+				if prev == "no" || prev == "zero" || prev == "0" || prev == "without" || prev == "none" {
+					negated = true
+					break
+				}
+			}
+			if negated {
+				continue
+			}
 			return true
 		}
 	}

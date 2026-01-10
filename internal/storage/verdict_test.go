@@ -84,6 +84,21 @@ func TestParseVerdict(t *testing.T) {
 			output: "100. No issues found.",
 			want:   "P",
 		},
+		{
+			name:   "no tests failed is pass",
+			output: "No issues found; no tests failed.",
+			want:   "P",
+		},
+		{
+			name:   "zero errors is pass",
+			output: "No issues found, 0 errors.",
+			want:   "P",
+		},
+		{
+			name:   "without bugs is pass",
+			output: "No issues found, without bugs.",
+			want:   "P",
+		},
 
 		// Fail cases - findings present or ambiguous
 		{
