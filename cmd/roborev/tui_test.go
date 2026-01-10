@@ -2755,3 +2755,217 @@ func TestTUIJobsMsgAppendKeepsLoadingJobs(t *testing.T) {
 		t.Error("loadingJobs should remain true after append JobsMsg")
 	}
 }
+
+func TestTUIHideAddressedToggle(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewQueue
+
+	// Initial state: hideAddressed is false
+	if m.hideAddressed {
+		t.Error("hideAddressed should be false initially")
+	}
+
+	// Press 'h' to toggle
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m2 := updated.(tuiModel)
+
+	if !m2.hideAddressed {
+		t.Error("hideAddressed should be true after pressing 'h'")
+	}
+
+	// Press 'h' again to toggle back
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m3 := updated.(tuiModel)
+
+	if m3.hideAddressed {
+		t.Error("hideAddressed should be false after pressing 'h' again")
+	}
+}
+
+func TestTUIHideAddressedFiltersJobs(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewQueue
+	m.hideAddressed = true
+
+	addressedTrue := true
+	addressedFalse := false
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone, Addressed: &addressedTrue},  // hidden: addressed
+		{ID: 2, Status: storage.JobStatusDone, Addressed: &addressedFalse}, // visible
+		{ID: 3, Status: storage.JobStatusFailed},                           // hidden: failed
+		{ID: 4, Status: storage.JobStatusCanceled},                         // hidden: canceled
+		{ID: 5, Status: storage.JobStatusDone, Addressed: &addressedFalse}, // visible
+	}
+
+	// Check visibility
+	if m.isJobVisible(m.jobs[0]) {
+		t.Error("Addressed job should be hidden")
+	}
+	if !m.isJobVisible(m.jobs[1]) {
+		t.Error("Non-addressed job should be visible")
+	}
+	if m.isJobVisible(m.jobs[2]) {
+		t.Error("Failed job should be hidden")
+	}
+	if m.isJobVisible(m.jobs[3]) {
+		t.Error("Canceled job should be hidden")
+	}
+	if !m.isJobVisible(m.jobs[4]) {
+		t.Error("Non-addressed job should be visible")
+	}
+
+	// getVisibleJobs should only return 2 jobs
+	visible := m.getVisibleJobs()
+	if len(visible) != 2 {
+		t.Errorf("Expected 2 visible jobs, got %d", len(visible))
+	}
+	if visible[0].ID != 2 || visible[1].ID != 5 {
+		t.Errorf("Expected visible jobs 2 and 5, got %d and %d", visible[0].ID, visible[1].ID)
+	}
+}
+
+func TestTUIHideAddressedSelectionMovesToVisible(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewQueue
+
+	addressedTrue := true
+	addressedFalse := false
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone, Addressed: &addressedTrue},  // will be hidden
+		{ID: 2, Status: storage.JobStatusDone, Addressed: &addressedFalse}, // will be visible
+		{ID: 3, Status: storage.JobStatusDone, Addressed: &addressedFalse}, // will be visible
+	}
+
+	// Select the first job (addressed)
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+
+	// Toggle hide addressed
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m2 := updated.(tuiModel)
+
+	// Selection should move to first visible job (ID=2)
+	if m2.selectedIdx != 1 {
+		t.Errorf("Expected selectedIdx=1, got %d", m2.selectedIdx)
+	}
+	if m2.selectedJobID != 2 {
+		t.Errorf("Expected selectedJobID=2, got %d", m2.selectedJobID)
+	}
+}
+
+func TestTUIHideAddressedRefreshRevalidatesSelection(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewQueue
+	m.hideAddressed = true
+
+	addressedFalse := false
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone, Addressed: &addressedFalse},
+		{ID: 2, Status: storage.JobStatusDone, Addressed: &addressedFalse},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+
+	// Simulate jobs refresh where job 1 is now addressed
+	addressedTrue := true
+	updated, _ := m.Update(tuiJobsMsg{
+		jobs: []storage.ReviewJob{
+			{ID: 1, Status: storage.JobStatusDone, Addressed: &addressedTrue},  // now addressed (hidden)
+			{ID: 2, Status: storage.JobStatusDone, Addressed: &addressedFalse}, // still visible
+		},
+		hasMore: false,
+	})
+	m2 := updated.(tuiModel)
+
+	// Selection should move to job 2 since job 1 is now hidden
+	if m2.selectedJobID != 2 {
+		t.Errorf("Expected selectedJobID=2, got %d", m2.selectedJobID)
+	}
+	if m2.selectedIdx != 1 {
+		t.Errorf("Expected selectedIdx=1, got %d", m2.selectedIdx)
+	}
+}
+
+func TestTUIHideAddressedNavigationSkipsHidden(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewQueue
+	m.hideAddressed = true
+
+	addressedTrue := true
+	addressedFalse := false
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone, Addressed: &addressedFalse}, // visible
+		{ID: 2, Status: storage.JobStatusDone, Addressed: &addressedTrue},  // hidden
+		{ID: 3, Status: storage.JobStatusFailed},                           // hidden
+		{ID: 4, Status: storage.JobStatusDone, Addressed: &addressedFalse}, // visible
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+
+	// Navigate down - should skip jobs 2 and 3
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m2 := updated.(tuiModel)
+
+	if m2.selectedJobID != 4 {
+		t.Errorf("Expected selectedJobID=4, got %d", m2.selectedJobID)
+	}
+	if m2.selectedIdx != 3 {
+		t.Errorf("Expected selectedIdx=3, got %d", m2.selectedIdx)
+	}
+}
+
+func TestTUIHideAddressedWithRepoFilter(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewQueue
+	m.hideAddressed = true
+	m.activeRepoFilter = "/repo/a"
+
+	addressedTrue := true
+	addressedFalse := false
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, RepoPath: "/repo/a", Status: storage.JobStatusDone, Addressed: &addressedFalse}, // visible: matches repo, not addressed
+		{ID: 2, RepoPath: "/repo/b", Status: storage.JobStatusDone, Addressed: &addressedFalse}, // hidden: wrong repo
+		{ID: 3, RepoPath: "/repo/a", Status: storage.JobStatusDone, Addressed: &addressedTrue},  // hidden: addressed
+		{ID: 4, RepoPath: "/repo/a", Status: storage.JobStatusFailed},                           // hidden: failed
+	}
+
+	// Only job 1 should be visible
+	visible := m.getVisibleJobs()
+	if len(visible) != 1 {
+		t.Errorf("Expected 1 visible job, got %d", len(visible))
+	}
+	if visible[0].ID != 1 {
+		t.Errorf("Expected visible job ID=1, got %d", visible[0].ID)
+	}
+}
+
+func TestTUIAddressedToggleMovesSelectionWithHideActive(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewQueue
+	m.hideAddressed = true
+
+	addressedFalse := false
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone, Addressed: &addressedFalse},
+		{ID: 2, Status: storage.JobStatusDone, Addressed: &addressedFalse},
+		{ID: 3, Status: storage.JobStatusDone, Addressed: &addressedFalse},
+	}
+	m.selectedIdx = 1
+	m.selectedJobID = 2
+
+	// Simulate marking job 2 as addressed
+	addressedTrue := true
+	m.jobs[1].Addressed = &addressedTrue
+
+	// Verify job 2 is now hidden
+	if m.isJobVisible(m.jobs[1]) {
+		t.Error("Job 2 should be hidden after marking as addressed")
+	}
+
+	// Simulate what happens in 'a' handler - selection should move
+	// Since job 2 is now hidden, find next visible
+	nextIdx := m.findNextVisibleJob(m.selectedIdx)
+	if nextIdx != 2 {
+		t.Errorf("Expected next visible job at index 2, got %d", nextIdx)
+	}
+}

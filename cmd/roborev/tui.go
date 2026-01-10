@@ -1133,8 +1133,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !found {
 				// Job was removed - clamp index to valid range
 				m.selectedIdx = max(0, min(len(m.jobs)-1, m.selectedIdx))
-				// If filter is active, ensure we're on a visible job
-				if m.activeRepoFilter != "" {
+				// If any filter is active, ensure we're on a visible job
+				if m.activeRepoFilter != "" || m.hideAddressed {
 					firstVisible := m.findFirstVisibleJob()
 					if firstVisible >= 0 {
 						m.selectedIdx = firstVisible
@@ -1147,19 +1147,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.selectedJobID = m.jobs[m.selectedIdx].ID
 				}
-			} else if m.activeRepoFilter != "" {
-				// Job exists but check if it matches the filter
-				if m.jobs[m.selectedIdx].RepoPath != m.activeRepoFilter {
-					// Selected job doesn't match filter, select first visible
-					firstVisible := m.findFirstVisibleJob()
-					if firstVisible >= 0 {
-						m.selectedIdx = firstVisible
-						m.selectedJobID = m.jobs[firstVisible].ID
-					} else {
-						// No visible jobs for this filter
-						m.selectedIdx = -1
-						m.selectedJobID = 0
-					}
+			} else if !m.isJobVisible(m.jobs[m.selectedIdx]) {
+				// Job exists but is not visible (filtered by repo or hidden)
+				firstVisible := m.findFirstVisibleJob()
+				if firstVisible >= 0 {
+					m.selectedIdx = firstVisible
+					m.selectedJobID = m.jobs[firstVisible].ID
+				} else {
+					// No visible jobs for this filter
+					m.selectedIdx = -1
+					m.selectedJobID = 0
 				}
 			}
 		} else if m.currentView == tuiViewReview && m.currentReview != nil && m.currentReview.Job != nil {
