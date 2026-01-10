@@ -225,6 +225,85 @@ func TestReviewOperations(t *testing.T) {
 	}
 }
 
+func TestReviewVerdictComputation(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	repo, _ := db.GetOrCreateRepo("/tmp/test-repo")
+
+	t.Run("verdict populated when output exists and no error", func(t *testing.T) {
+		commit, _ := db.GetOrCreateCommit(repo.ID, "verdict-pass", "Author", "Subject", time.Now())
+		job, _ := db.EnqueueJob(repo.ID, commit.ID, "verdict-pass", "codex")
+		db.ClaimJob("worker-1")
+		db.CompleteJob(job.ID, "codex", "the prompt", "No issues found. The code looks good.")
+
+		review, err := db.GetReviewByJobID(job.ID)
+		if err != nil {
+			t.Fatalf("GetReviewByJobID failed: %v", err)
+		}
+		if review.Job.Verdict == nil {
+			t.Fatal("Expected verdict to be populated, got nil")
+		}
+		if *review.Job.Verdict != "P" {
+			t.Errorf("Expected verdict 'P', got '%s'", *review.Job.Verdict)
+		}
+	})
+
+	t.Run("verdict nil when output is empty", func(t *testing.T) {
+		commit, _ := db.GetOrCreateCommit(repo.ID, "verdict-empty", "Author", "Subject", time.Now())
+		job, _ := db.EnqueueJob(repo.ID, commit.ID, "verdict-empty", "codex")
+		db.ClaimJob("worker-1")
+		db.CompleteJob(job.ID, "codex", "the prompt", "") // empty output
+
+		review, err := db.GetReviewByJobID(job.ID)
+		if err != nil {
+			t.Fatalf("GetReviewByJobID failed: %v", err)
+		}
+		if review.Job.Verdict != nil {
+			t.Errorf("Expected verdict to be nil for empty output, got '%s'", *review.Job.Verdict)
+		}
+	})
+
+	t.Run("verdict nil when job has error", func(t *testing.T) {
+		commit, _ := db.GetOrCreateCommit(repo.ID, "verdict-error", "Author", "Subject", time.Now())
+		job, _ := db.EnqueueJob(repo.ID, commit.ID, "verdict-error", "codex")
+		db.ClaimJob("worker-1")
+		db.FailJob(job.ID, "API rate limit exceeded")
+
+		// Manually insert a review to simulate edge case
+		_, err := db.Exec(`INSERT INTO reviews (job_id, agent, prompt, output) VALUES (?, 'codex', 'prompt', 'No issues found.')`, job.ID)
+		if err != nil {
+			t.Fatalf("Failed to insert review: %v", err)
+		}
+
+		review, err := db.GetReviewByJobID(job.ID)
+		if err != nil {
+			t.Fatalf("GetReviewByJobID failed: %v", err)
+		}
+		if review.Job.Verdict != nil {
+			t.Errorf("Expected verdict to be nil when job has error, got '%s'", *review.Job.Verdict)
+		}
+	})
+
+	t.Run("GetReviewByCommitSHA also respects verdict guard", func(t *testing.T) {
+		commit, _ := db.GetOrCreateCommit(repo.ID, "verdict-sha", "Author", "Subject", time.Now())
+		job, _ := db.EnqueueJob(repo.ID, commit.ID, "verdict-sha", "codex")
+		db.ClaimJob("worker-1")
+		db.CompleteJob(job.ID, "codex", "the prompt", "No issues found.")
+
+		review, err := db.GetReviewByCommitSHA("verdict-sha")
+		if err != nil {
+			t.Fatalf("GetReviewByCommitSHA failed: %v", err)
+		}
+		if review.Job.Verdict == nil {
+			t.Fatal("Expected verdict to be populated, got nil")
+		}
+		if *review.Job.Verdict != "P" {
+			t.Errorf("Expected verdict 'P', got '%s'", *review.Job.Verdict)
+		}
+	})
+}
+
 func TestResponseOperations(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
