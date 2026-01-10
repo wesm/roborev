@@ -130,6 +130,11 @@ func TestParseVerdict(t *testing.T) {
 			want:   "P",
 		},
 		{
+			name:   "i didnt find any issues curly apostrophe",
+			output: "I didn\u2019t find any issues in this commit.",
+			want:   "P",
+		},
+		{
 			name:   "i didn't find any issues with checked for",
 			output: "I didn't find any issues. I checked for bugs, security issues, testing gaps, regressions, and code quality concerns.",
 			want:   "P",
@@ -190,6 +195,31 @@ func TestParseVerdict(t *testing.T) {
 			name:   "checked for however found problem",
 			output: "No issues found. I checked for errors however there is a crash.",
 			want:   "F",
+		},
+		{
+			name:   "found issues without article",
+			output: "No issues found. I checked for bugs and found issues.",
+			want:   "F",
+		},
+		{
+			name:   "found errors without article",
+			output: "No issues found. I looked for problems and found errors.",
+			want:   "F",
+		},
+		{
+			name:   "still crashes pattern",
+			output: "No issues found. I checked for bugs and it still crashes.",
+			want:   "F",
+		},
+		{
+			name:   "still fails pattern",
+			output: "No issues found. Checked for regressions but test still fails.",
+			want:   "F",
+		},
+		{
+			name:   "found a way is benign",
+			output: "No issues found. I checked for bugs and found a way to improve the docs.",
+			want:   "P",
 		},
 
 		// Fail cases - findings present or ambiguous

@@ -12,6 +12,9 @@ import (
 func parseVerdict(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(strings.ToLower(line))
+		// Normalize curly apostrophes to straight apostrophes (LLMs sometimes use these)
+		trimmed = strings.ReplaceAll(trimmed, "\u2018", "'") // left single quote
+		trimmed = strings.ReplaceAll(trimmed, "\u2019", "'") // right single quote
 		// Strip leading list markers (bullets, numbers, etc.)
 		trimmed = stripListMarker(trimmed)
 
@@ -95,15 +98,40 @@ func checkClauseForCaveat(clause string) bool {
 
 	if hasCheckPhrase {
 		// If the clause has a check phrase, look for actual findings.
-		// "but found none" or "but found nothing" are still passes.
-		hasFinding := strings.Contains(lc, " and found a ") ||
-			strings.Contains(lc, " and found an ") ||
-			strings.Contains(lc, " and found the ") ||
-			strings.Contains(lc, " but found a ") ||
-			strings.Contains(lc, " but found an ") ||
-			strings.Contains(lc, " but found the ") ||
-			(strings.Contains(lc, " found a ") && !strings.Contains(lc, "found a way")) ||
-			strings.Contains(lc, " found an ")
+		// Skip this clause if it's just describing what was checked (e.g., "I checked for bugs").
+		// But flag it if there are actual findings mentioned.
+
+		// Look for "found" followed by issue keywords (with or without articles)
+		hasFinding := false
+		if idx := strings.Index(lc, " found "); idx >= 0 {
+			afterFound := lc[idx+7:] // after " found "
+			// Check if followed by issue keywords (skip benign phrases like "found a way")
+			issueKeywords := []string{"issue", "bug", "error", "crash", "panic", "fail", "break", "race", "problem", "vulnerability"}
+			for _, kw := range issueKeywords {
+				if strings.HasPrefix(afterFound, kw) ||
+					strings.HasPrefix(afterFound, "a "+kw) ||
+					strings.HasPrefix(afterFound, "an "+kw) ||
+					strings.HasPrefix(afterFound, "the "+kw) ||
+					strings.HasPrefix(afterFound, "some "+kw) ||
+					strings.Contains(afterFound, " "+kw) {
+					hasFinding = true
+					break
+				}
+			}
+		}
+
+		// Check for "still <issue>" pattern (e.g., "it still crashes")
+		hasStillIssue := false
+		if idx := strings.Index(lc, " still "); idx >= 0 {
+			afterStill := lc[idx+7:]
+			stillKeywords := []string{"crash", "panic", "fail", "break", "error", "bug"}
+			for _, kw := range stillKeywords {
+				if strings.HasPrefix(afterStill, kw) || strings.Contains(afterStill, " "+kw) {
+					hasStillIssue = true
+					break
+				}
+			}
+		}
 
 		// Check for contrastive markers with issue words AFTER the marker
 		// (not before, which would be describing what was checked)
@@ -125,7 +153,7 @@ func checkClauseForCaveat(clause string) bool {
 			}
 		}
 
-		if !hasFinding && !hasContrastWithIssue {
+		if !hasFinding && !hasStillIssue && !hasContrastWithIssue {
 			return false
 		}
 		// Otherwise continue to check for caveats in the clause
