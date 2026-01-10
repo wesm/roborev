@@ -12,26 +12,64 @@ import (
 func parseVerdict(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(strings.ToLower(line))
-		// Strip leading bullet markers
-		trimmed = strings.TrimPrefix(trimmed, "- ")
-		trimmed = strings.TrimPrefix(trimmed, "* ")
-		trimmed = strings.TrimSpace(trimmed)
+		// Strip leading list markers (bullets, numbers, etc.)
+		trimmed = stripListMarker(trimmed)
 
 		// Check for pass indicators at start of line
 		isPass := strings.HasPrefix(trimmed, "no issues") ||
 			strings.HasPrefix(trimmed, "no findings")
 
 		if isPass {
-			// Reject if line contains caveats
-			if strings.Contains(trimmed, " but ") ||
-				strings.Contains(trimmed, " however") ||
-				strings.Contains(trimmed, " except") {
+			// Reject if line contains caveats (check for word boundaries)
+			if hasCaveat(trimmed) {
 				continue
 			}
 			return "P"
 		}
 	}
 	return "F"
+}
+
+// stripListMarker removes leading bullet/number markers from a line
+func stripListMarker(s string) string {
+	// Handle: "- ", "* ", "1. ", "2) ", etc.
+	s = strings.TrimSpace(s)
+	if len(s) == 0 {
+		return s
+	}
+	// Check for bullet markers
+	if s[0] == '-' || s[0] == '*' {
+		return strings.TrimSpace(s[1:])
+	}
+	// Check for numbered lists (e.g., "1.", "1)", "1:")
+	for i := 0; i < len(s) && i < 3; i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			continue
+		}
+		if s[i] == '.' || s[i] == ')' || s[i] == ':' {
+			return strings.TrimSpace(s[i+1:])
+		}
+		break
+	}
+	return s
+}
+
+// hasCaveat checks if the line contains contrastive words
+func hasCaveat(s string) bool {
+	// Normalize punctuation that could replace spaces
+	normalized := strings.ReplaceAll(s, "—", " ")
+	normalized = strings.ReplaceAll(normalized, "–", " ")
+	normalized = strings.ReplaceAll(normalized, ",", " ")
+
+	words := strings.Fields(normalized)
+	for _, w := range words {
+		// Strip trailing punctuation for word matching
+		w = strings.TrimRight(w, ".,;:!?")
+		if w == "but" || w == "however" || w == "except" {
+			return true
+		}
+	}
+	return false
 }
 
 // parseSQLiteTime parses a time string from SQLite which may be in different formats

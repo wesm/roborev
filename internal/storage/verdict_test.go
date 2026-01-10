@@ -69,6 +69,16 @@ func TestParseVerdict(t *testing.T) {
 			output: "No issues in this change. Looks good.",
 			want:   "P",
 		},
+		{
+			name:   "numbered list no issues",
+			output: "1. No issues found.",
+			want:   "P",
+		},
+		{
+			name:   "bullet with extra spaces",
+			output: "-   No issues found.",
+			want:   "P",
+		},
 
 		// Fail cases - findings present or ambiguous
 		{
@@ -114,6 +124,21 @@ func TestParseVerdict(t *testing.T) {
 		{
 			name:   "no issues found except caveat",
 			output: "No issues found except for minor style issues.",
+			want:   "F",
+		},
+		{
+			name:   "no issues found but with period",
+			output: "No issues found but.",
+			want:   "F",
+		},
+		{
+			name:   "no issues with em dash caveat",
+			output: "No issues found—but there is a bug.",
+			want:   "F",
+		},
+		{
+			name:   "no issues with comma caveat",
+			output: "No issues found, but consider refactoring.",
 			want:   "F",
 		},
 	}
