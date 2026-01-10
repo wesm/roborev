@@ -1639,6 +1639,17 @@ func (m tuiModel) renderReviewView() string {
 		}
 		title := fmt.Sprintf("Review %s%s%s (%s)%s", idStr, repoStr, ref, review.Agent, addressedStr)
 		b.WriteString(tuiTitleStyle.Render(title))
+
+		// Show verdict with color
+		if review.Job.Verdict != nil && *review.Job.Verdict != "" {
+			b.WriteString(" ")
+			v := *review.Job.Verdict
+			if v == "P" {
+				b.WriteString(tuiPassStyle.Render("Verdict: Pass"))
+			} else {
+				b.WriteString(tuiFailStyle.Render("Verdict: Fail"))
+			}
+		}
 	} else {
 		b.WriteString(tuiTitleStyle.Render("Review"))
 	}

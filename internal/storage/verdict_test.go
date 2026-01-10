@@ -160,6 +160,23 @@ func TestParseVerdict(t *testing.T) {
 			want:   "P",
 		},
 
+		// Fail cases - checked for with actual findings
+		{
+			name:   "checked for but found issue",
+			output: "No issues found. I checked for bugs but found a race condition.",
+			want:   "F",
+		},
+		{
+			name:   "looked for and found crash",
+			output: "No issues found. I looked for crashes and found a panic.",
+			want:   "F",
+		},
+		{
+			name:   "checked for however found problem",
+			output: "No issues found. I checked for errors however there is a crash.",
+			want:   "F",
+		},
+
 		// Fail cases - findings present or ambiguous
 		{
 			name:   "has findings with severity",

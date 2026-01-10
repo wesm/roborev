@@ -83,15 +83,52 @@ func checkClauseForCaveat(clause string) bool {
 	// Normalize remaining punctuation
 	normalized := strings.ReplaceAll(clause, ",", " ")
 
-	// Skip clauses that describe what was checked, not findings
+	// Check if clause describes what was checked (not findings)
 	// e.g., "I checked for bugs, security issues..."
+	// But only skip if it doesn't also contain actual caveats
 	lc := strings.ToLower(normalized)
-	if strings.Contains(lc, "checked for") ||
+	hasCheckPhrase := strings.Contains(lc, "checked for") ||
 		strings.Contains(lc, "looking for") ||
 		strings.Contains(lc, "looked for") ||
 		strings.Contains(lc, "searching for") ||
-		strings.Contains(lc, "searched for") {
-		return false
+		strings.Contains(lc, "searched for")
+
+	if hasCheckPhrase {
+		// If the clause has a check phrase, look for actual findings.
+		// "but found none" or "but found nothing" are still passes.
+		hasFinding := strings.Contains(lc, " and found a ") ||
+			strings.Contains(lc, " and found an ") ||
+			strings.Contains(lc, " and found the ") ||
+			strings.Contains(lc, " but found a ") ||
+			strings.Contains(lc, " but found an ") ||
+			strings.Contains(lc, " but found the ") ||
+			(strings.Contains(lc, " found a ") && !strings.Contains(lc, "found a way")) ||
+			strings.Contains(lc, " found an ")
+
+		// Check for contrastive markers with issue words AFTER the marker
+		// (not before, which would be describing what was checked)
+		hasContrastWithIssue := false
+		for _, marker := range []string{" however ", " but "} {
+			if idx := strings.Index(lc, marker); idx >= 0 {
+				tail := lc[idx+len(marker):]
+				if strings.Contains(tail, "crash") || strings.Contains(tail, "panic") ||
+					strings.Contains(tail, "error") || strings.Contains(tail, "bug") ||
+					strings.Contains(tail, "fail") || strings.Contains(tail, "break") ||
+					strings.Contains(tail, "race") || strings.Contains(tail, "issue") {
+					// Make sure it's not negated like "found none"
+					if !strings.Contains(tail, "found none") && !strings.Contains(tail, "found nothing") &&
+						!strings.Contains(tail, "no ") && !strings.Contains(tail, "none") {
+						hasContrastWithIssue = true
+						break
+					}
+				}
+			}
+		}
+
+		if !hasFinding && !hasContrastWithIssue {
+			return false
+		}
+		// Otherwise continue to check for caveats in the clause
 	}
 
 	words := strings.Fields(normalized)
