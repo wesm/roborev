@@ -7,13 +7,17 @@ import (
 )
 
 // parseVerdict extracts P (pass) or F (fail) from review output.
-// Returns "P" only if clear positive indicators found, "F" otherwise.
+// Returns "P" only if a clear pass indicator appears at the start of a line.
+// This avoids false positives from phrases like "No issues with X, but..."
 func parseVerdict(output string) string {
-	lower := strings.ToLower(output)
-	if strings.Contains(lower, "no issues found") ||
-		strings.Contains(lower, "no issues") ||
-		strings.Contains(lower, "no findings") {
-		return "P"
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(strings.ToLower(line))
+		if strings.HasPrefix(trimmed, "no issues found") ||
+			strings.HasPrefix(trimmed, "no issues.") ||
+			strings.HasPrefix(trimmed, "no findings") ||
+			trimmed == "no issues" {
+			return "P"
+		}
 	}
 	return "F"
 }
