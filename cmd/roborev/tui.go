@@ -81,7 +81,8 @@ type tuiModel struct {
 
 	// Pagination state
 	hasMore        bool // true if there are more jobs to load
-	loadingMore    bool // true if currently loading more jobs
+	loadingMore    bool // true if currently loading more jobs (pagination)
+	loadingJobs    bool // true if currently loading jobs (full refresh)
 	heightDetected bool // true after first WindowSizeMsg (real terminal height known)
 
 	// Filter modal state
@@ -717,6 +718,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedIdx = -1
 					m.selectedJobID = 0
 					// Refetch jobs with the new filter applied at the API level
+					m.loadingJobs = true
 					return m, m.fetchJobs()
 				}
 				return m, nil
@@ -1051,6 +1053,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Invalidate selection until refetch completes
 				m.selectedIdx = -1
 				m.selectedJobID = 0
+				m.loadingJobs = true
 				return m, m.fetchJobs()
 			} else if m.currentView == tuiViewReview {
 				m.currentView = tuiViewQueue
@@ -1075,23 +1078,28 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.heightDetected = true
 
 		// If terminal can show more jobs than we have, re-fetch to fill screen
-		// Gate on !loadingMore to avoid race conditions with pagination in flight
-		if !m.loadingMore && len(m.jobs) > 0 && m.hasMore && m.activeRepoFilter == "" {
+		// Gate on !loadingMore and !loadingJobs to avoid race conditions
+		if !m.loadingMore && !m.loadingJobs && len(m.jobs) > 0 && m.hasMore && m.activeRepoFilter == "" {
 			newVisibleRows := m.height - 9 + 10
 			if newVisibleRows > len(m.jobs) {
+				m.loadingJobs = true
 				return m, m.fetchJobs()
 			}
 		}
 
 	case tuiTickMsg:
-		// Skip job refresh while pagination is in flight to prevent race conditions
-		if m.loadingMore {
+		// Skip job refresh while pagination or another refresh is in flight
+		if m.loadingMore || m.loadingJobs {
 			return m, tea.Batch(m.tick(), m.fetchStatus())
 		}
+		m.loadingJobs = true
 		return m, tea.Batch(m.tick(), m.fetchJobs(), m.fetchStatus())
 
 	case tuiJobsMsg:
 		m.loadingMore = false
+		if !msg.append {
+			m.loadingJobs = false
+		}
 		m.hasMore = msg.hasMore
 
 		if msg.append {

@@ -2666,4 +2666,92 @@ func TestTUIResizeRefetchOnLaterResize(t *testing.T) {
 	if cmd == nil {
 		t.Error("Should return fetchJobs command when terminal grows and can show more jobs")
 	}
+
+	// loadingJobs should be set
+	if !m2.loadingJobs {
+		t.Error("loadingJobs should be true after resize triggers fetch")
+	}
+}
+
+func TestTUIResizeNoRefetchWhileLoadingJobs(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Set up with few jobs, but loadingJobs is already true (fetch in progress)
+	m.jobs = []storage.ReviewJob{{ID: 1}, {ID: 2}, {ID: 3}}
+	m.hasMore = true
+	m.loadingMore = false
+	m.loadingJobs = true // Already fetching
+	m.heightDetected = true
+	m.height = 30
+
+	// Simulate terminal growing larger
+	updated, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 80})
+	m2 := updated.(tuiModel)
+
+	if m2.height != 80 {
+		t.Errorf("Expected height 80, got %d", m2.height)
+	}
+
+	// Should NOT trigger another fetch because loadingJobs is true
+	if cmd != nil {
+		t.Error("Should not return command when loadingJobs is true (fetch already in progress)")
+	}
+}
+
+func TestTUITickNoRefreshWhileLoadingJobs(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Set up with loadingJobs true
+	m.jobs = []storage.ReviewJob{{ID: 1}, {ID: 2}, {ID: 3}}
+	m.loadingJobs = true
+
+	// Simulate tick
+	updated, _ := m.Update(tuiTickMsg(time.Now()))
+	m2 := updated.(tuiModel)
+
+	// loadingJobs should still be true (not reset by tick)
+	if !m2.loadingJobs {
+		t.Error("loadingJobs should remain true when tick skips refresh")
+	}
+}
+
+func TestTUIJobsMsgClearsLoadingJobs(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Set up with loadingJobs true
+	m.loadingJobs = true
+
+	// Simulate jobs response (not append)
+	updated, _ := m.Update(tuiJobsMsg{
+		jobs:    []storage.ReviewJob{{ID: 1}},
+		hasMore: false,
+		append:  false,
+	})
+	m2 := updated.(tuiModel)
+
+	// loadingJobs should be cleared
+	if m2.loadingJobs {
+		t.Error("loadingJobs should be false after non-append JobsMsg")
+	}
+}
+
+func TestTUIJobsMsgAppendKeepsLoadingJobs(t *testing.T) {
+	m := newTuiModel("http://localhost")
+
+	// Set up with loadingJobs true (shouldn't normally happen with append, but test the logic)
+	m.jobs = []storage.ReviewJob{{ID: 1}}
+	m.loadingJobs = true
+
+	// Simulate jobs response (append mode - pagination)
+	updated, _ := m.Update(tuiJobsMsg{
+		jobs:    []storage.ReviewJob{{ID: 2}},
+		hasMore: false,
+		append:  true,
+	})
+	m2 := updated.(tuiModel)
+
+	// loadingJobs should NOT be cleared by append (it's for pagination, not full refresh)
+	if !m2.loadingJobs {
+		t.Error("loadingJobs should remain true after append JobsMsg")
+	}
 }
