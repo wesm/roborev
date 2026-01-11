@@ -401,6 +401,21 @@ func TestParseVerdict(t *testing.T) {
 			output: "No issues found. These modules have vulnerabilities.",
 			want:   "F",
 		},
+		{
+			name:   "many issues remain not negated by any substring",
+			output: "No issues found. Many issues remain.",
+			want:   "F",
+		},
+		{
+			name:   "no doubt issues remain not negated by distant no",
+			output: "No issues found. No doubt, issues remain.",
+			want:   "F",
+		},
+		{
+			name:   "no changes issues exist not negated",
+			output: "No issues found. No changes; issues exist.",
+			want:   "F",
+		},
 
 		// Fail cases - findings present or ambiguous
 		{

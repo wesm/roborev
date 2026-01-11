@@ -176,18 +176,19 @@ func checkClauseForCaveat(clause string) bool {
 		"has issues", "has problems", "have issues", "have problems",
 		"has vulnerabilit", "have vulnerabilit",
 	}
-	contextNegationPrefixes := []string{"no ", "any ", "no more ", "don't ", "doesn't "}
+	// Negators must appear immediately before the pattern (prefix ends with negator)
+	contextNegationPrefixes := []string{"no ", "no more ", "don't ", "doesn't "}
 	for _, pattern := range contextualPatterns {
 		if idx := strings.Index(lc, pattern); idx >= 0 {
-			// Check if preceded by negation within nearby text
-			start := idx - 25
+			// Check if immediately preceded by negation
+			start := idx - 15
 			if start < 0 {
 				start = 0
 			}
 			prefix := lc[start:idx]
 			isNegated := false
 			for _, neg := range contextNegationPrefixes {
-				if strings.Contains(prefix, neg) {
+				if strings.HasSuffix(prefix, neg) {
 					isNegated = true
 					break
 				}
@@ -200,19 +201,19 @@ func checkClauseForCaveat(clause string) bool {
 	// Check "issues/problems with/in" but only if not negated
 	withInPatterns := []string{"issues with", "problems with", "issue with", "problem with",
 		"issues in", "problems in", "issue in", "problem in"}
-	negationPrefixes := []string{"no ", "any ", "didn't find ", "didn't find any ", "did not find ",
-		"did not find any ", "found no ", "found any ", "not find ", "not find any "}
+	withInNegationPrefixes := []string{"no ", "didn't find ", "didn't find any ", "did not find ",
+		"did not find any ", "found no ", "not find ", "not find any "}
 	for _, pattern := range withInPatterns {
 		if idx := strings.Index(lc, pattern); idx >= 0 {
-			// Check if preceded by negation within nearby text
+			// Check if immediately preceded by negation
 			start := idx - 25
 			if start < 0 {
 				start = 0
 			}
 			prefix := lc[start:idx]
 			isNegated := false
-			for _, neg := range negationPrefixes {
-				if strings.Contains(prefix, neg) {
+			for _, neg := range withInNegationPrefixes {
+				if strings.HasSuffix(prefix, neg) {
 					isNegated = true
 					break
 				}
