@@ -336,6 +336,31 @@ func TestParseVerdict(t *testing.T) {
 			output: "No issues found. Security scan found multiple vulnerabilities.",
 			want:   "F",
 		},
+		{
+			name:   "found at start of clause",
+			output: "No issues found. Found issues in the auth module.",
+			want:   "F",
+		},
+		{
+			name:   "found colon issues",
+			output: "No issues found. Review result: found multiple bugs.",
+			want:   "F",
+		},
+		{
+			name:   "there are issues",
+			output: "No issues found. There are issues with the implementation.",
+			want:   "F",
+		},
+		{
+			name:   "problems remain",
+			output: "No issues found. Problems remain in the codebase.",
+			want:   "F",
+		},
+		{
+			name:   "has issues",
+			output: "No issues found. The code has issues.",
+			want:   "F",
+		},
 
 		// Fail cases - findings present or ambiguous
 		{

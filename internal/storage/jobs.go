@@ -83,12 +83,25 @@ func hasCaveat(s string) bool {
 
 // checkClauseForCaveat checks a single clause for caveats
 func checkClauseForCaveat(clause string) bool {
-	// Normalize remaining punctuation
+	// Normalize punctuation
 	normalized := strings.ReplaceAll(clause, ",", " ")
+	normalized = strings.ReplaceAll(normalized, ":", " ")
 	lc := strings.ToLower(normalized)
 
-	// Check for "found <issue>" pattern - runs unconditionally since it's specific enough
-	// to avoid false positives (requires "found" + quantifier/adjective + issue keyword)
+	// Benign phrases that contain issue keywords but aren't actual issues
+	benignPhrases := []string{
+		"problem statement", "problem domain", "problem space", "problem definition",
+		"issue tracker", "issue tracking", "issue number", "issue #",
+		"vulnerability disclosure", "vulnerability report", "vulnerability scan",
+	}
+	for _, bp := range benignPhrases {
+		if strings.Contains(lc, bp) {
+			// Remove benign phrase to avoid false positives
+			lc = strings.ReplaceAll(lc, bp, "")
+		}
+	}
+
+	// Check for "found <issue>" pattern - handle both mid-clause and start-of-clause
 	issueKeywords := []string{
 		"issue", "issues", "bug", "bugs", "error", "errors",
 		"crash", "crashes", "panic", "panics", "fail", "failure", "failures",
@@ -98,16 +111,34 @@ func checkClauseForCaveat(clause string) bool {
 	quantifiers := []string{"", "a ", "an ", "the ", "some ", "multiple ", "several ", "many ", "a few ", "few ", "two ", "three ", "various ", "numerous "}
 	adjectives := []string{"", "critical ", "severe ", "serious ", "major ", "minor ", "potential ", "possible ", "obvious ", "subtle ", "important ", "significant "}
 
+	// Check for "found" at start of clause
+	if strings.HasPrefix(lc, "found ") {
+		afterFound := lc[6:]
+		if !strings.HasPrefix(afterFound, "no ") && !strings.HasPrefix(afterFound, "none") &&
+			!strings.HasPrefix(afterFound, "nothing") && !strings.HasPrefix(afterFound, "0 ") &&
+			!strings.HasPrefix(afterFound, "zero ") && !strings.HasPrefix(afterFound, "without ") {
+			for _, kw := range issueKeywords {
+				for _, q := range quantifiers {
+					for _, adj := range adjectives {
+						if strings.HasPrefix(afterFound, q+adj+kw) {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Check for " found " mid-clause
 	remaining := lc
 	for {
 		idx := strings.Index(remaining, " found ")
 		if idx < 0 {
 			break
 		}
-		afterFound := remaining[idx+7:] // after " found "
-		remaining = afterFound          // continue scanning from here
+		afterFound := remaining[idx+7:]
+		remaining = afterFound
 
-		// Skip if negated (found no/none/nothing/0/zero/without)
 		isNegated := strings.HasPrefix(afterFound, "no ") ||
 			strings.HasPrefix(afterFound, "none") ||
 			strings.HasPrefix(afterFound, "nothing") ||
@@ -115,17 +146,57 @@ func checkClauseForCaveat(clause string) bool {
 			strings.HasPrefix(afterFound, "zero ") ||
 			strings.HasPrefix(afterFound, "without ")
 		if isNegated {
-			continue // skip this "found", check for more
+			continue
 		}
 
-		// Check if followed by issue keywords (skip benign phrases like "found a way")
 		for _, kw := range issueKeywords {
 			for _, q := range quantifiers {
 				for _, adj := range adjectives {
 					if strings.HasPrefix(afterFound, q+adj+kw) {
-						return true // Found an actual issue
+						return true
 					}
 				}
+			}
+		}
+	}
+
+	// Check for contextual issue/problem/vulnerability patterns
+	// Only match if not negated (not preceded by "no ")
+	contextualPatterns := []string{
+		"there are issue", "there are problem", "there is a issue", "there is a problem",
+		"there is an issue", "there are vulnerabilit",
+		"issues remain", "problems remain", "vulnerabilities remain",
+		"issues exist", "problems exist", "vulnerabilities exist",
+		"has issue", "has problem", "have issue", "have problem",
+		"has issues", "has problems", "have issues", "have problems",
+	}
+	for _, pattern := range contextualPatterns {
+		if strings.Contains(lc, pattern) {
+			return true
+		}
+	}
+	// Check "issues/problems with/in" but only if not negated
+	withInPatterns := []string{"issues with", "problems with", "issue with", "problem with",
+		"issues in", "problems in", "issue in", "problem in"}
+	negationPrefixes := []string{"no ", "any ", "didn't find ", "didn't find any ", "did not find ",
+		"did not find any ", "found no ", "found any ", "not find ", "not find any "}
+	for _, pattern := range withInPatterns {
+		if idx := strings.Index(lc, pattern); idx >= 0 {
+			// Check if preceded by negation within nearby text
+			start := idx - 25
+			if start < 0 {
+				start = 0
+			}
+			prefix := lc[start:idx]
+			isNegated := false
+			for _, neg := range negationPrefixes {
+				if strings.Contains(prefix, neg) {
+					isNegated = true
+					break
+				}
+			}
+			if !isNegated {
+				return true
 			}
 		}
 	}
