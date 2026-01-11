@@ -103,9 +103,18 @@ func checkClauseForCaveat(clause string) bool {
 
 		// Look for "found" followed by issue keywords (with or without articles)
 		// Skip negated phrases like "found no issues", "found nothing", "found 0 errors"
+		// But continue scanning for subsequent "found" phrases that might have findings
 		hasFinding := false
-		if idx := strings.Index(lc, " found "); idx >= 0 {
-			afterFound := lc[idx+7:] // after " found "
+		issueKeywords := []string{"issue", "bug", "error", "crash", "panic", "fail", "break", "race", "problem", "vulnerability"}
+		remaining := lc
+		for {
+			idx := strings.Index(remaining, " found ")
+			if idx < 0 {
+				break
+			}
+			afterFound := remaining[idx+7:] // after " found "
+			remaining = afterFound          // continue scanning from here
+
 			// Skip if negated (found no/none/nothing/0/zero/without)
 			isNegated := strings.HasPrefix(afterFound, "no ") ||
 				strings.HasPrefix(afterFound, "none") ||
@@ -113,20 +122,23 @@ func checkClauseForCaveat(clause string) bool {
 				strings.HasPrefix(afterFound, "0 ") ||
 				strings.HasPrefix(afterFound, "zero ") ||
 				strings.HasPrefix(afterFound, "without ")
-			if !isNegated {
-				// Check if followed by issue keywords (skip benign phrases like "found a way")
-				issueKeywords := []string{"issue", "bug", "error", "crash", "panic", "fail", "break", "race", "problem", "vulnerability"}
-				for _, kw := range issueKeywords {
-					if strings.HasPrefix(afterFound, kw) ||
-						strings.HasPrefix(afterFound, "a "+kw) ||
-						strings.HasPrefix(afterFound, "an "+kw) ||
-						strings.HasPrefix(afterFound, "the "+kw) ||
-						strings.HasPrefix(afterFound, "some "+kw) ||
-						strings.Contains(afterFound, " "+kw) {
-						hasFinding = true
-						break
-					}
+			if isNegated {
+				continue // skip this "found", check for more
+			}
+
+			// Check if followed by issue keywords (skip benign phrases like "found a way")
+			for _, kw := range issueKeywords {
+				if strings.HasPrefix(afterFound, kw) ||
+					strings.HasPrefix(afterFound, "a "+kw) ||
+					strings.HasPrefix(afterFound, "an "+kw) ||
+					strings.HasPrefix(afterFound, "the "+kw) ||
+					strings.HasPrefix(afterFound, "some "+kw) {
+					hasFinding = true
+					break
 				}
+			}
+			if hasFinding {
+				break
 			}
 		}
 
