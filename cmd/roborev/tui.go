@@ -171,12 +171,15 @@ func (m tuiModel) fetchJobs() tea.Cmd {
 
 	return func() tea.Msg {
 		// Determine limit:
-		// - No limit (limit=0) when filtering to show full repo history
+		// - No limit (limit=0) when filtering to show full repo/addressed history
 		// - If we've paginated beyond visible area, maintain current view size
 		// - Otherwise fetch enough to fill visible area
 		var url string
 		if m.activeRepoFilter != "" {
 			url = fmt.Sprintf("%s/api/jobs?limit=0&repo=%s", m.serverAddr, neturl.QueryEscape(m.activeRepoFilter))
+		} else if m.hideAddressed {
+			// Fetch all jobs when hiding addressed - client-side filtering needs full dataset
+			url = fmt.Sprintf("%s/api/jobs?limit=0", m.serverAddr)
 		} else {
 			limit := visibleRows
 			if currentJobCount > visibleRows {
@@ -1029,7 +1032,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle hide addressed
 			if m.currentView == tuiViewQueue {
 				m.hideAddressed = !m.hideAddressed
-				// Ensure selection is on a visible job after toggle
+				// Update selection to first visible job immediately
 				if len(m.jobs) > 0 {
 					if m.selectedIdx < 0 || m.selectedIdx >= len(m.jobs) || !m.isJobVisible(m.jobs[m.selectedIdx]) {
 						// Selection invalid or hidden, move to first visible
@@ -1041,6 +1044,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selectedIdx = m.findFirstVisibleJob()
 						m.updateSelectedJobID()
 					}
+				}
+				if m.hideAddressed {
+					// Fetch all jobs when enabling filter (need full dataset for client-side filtering)
+					return m, m.fetchJobs()
 				}
 			}
 
