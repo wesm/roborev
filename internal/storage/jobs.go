@@ -360,12 +360,20 @@ func hasNegatorInLastWords(prefix string, negators []string, n int) bool {
 	return false
 }
 
-// hasNotVerbPattern checks if the last few words contain "not" followed by a verb like "find".
-// This handles patterns like "did not find", "could not find", "not finding", "not see".
+// hasNotVerbPattern checks if the last few words contain negation followed by a verb like "find".
+// Handles: "did not find", "not finding", "can't find", "cannot find", "couldn't find".
 func hasNotVerbPattern(prefix string) bool {
 	words := strings.Fields(prefix)
 	if len(words) < 2 {
 		return false
+	}
+	verbs := []string{"find", "finding", "found", "see", "seeing", "detect", "detecting", "have"}
+	// Contractions that imply "not" - these negate the following verb directly
+	contractions := map[string]bool{
+		"can't": true, "cant": true, "cannot": true,
+		"couldn't": true, "couldnt": true,
+		"won't": true, "wont": true,
+		"wouldn't": true, "wouldnt": true,
 	}
 	// Only check last 5 words, stop at clause boundaries
 	checked := 0
@@ -379,7 +387,14 @@ func hasNotVerbPattern(prefix string) bool {
 		prev := strings.Trim(prevRaw, ".,;:!?()[]\"'")
 		// Check for "not" followed by verb
 		if prev == "not" {
-			verbs := []string{"find", "finding", "found", "see", "seeing", "detect", "detecting", "have"}
+			for _, v := range verbs {
+				if w == v {
+					return true
+				}
+			}
+		}
+		// Check for contraction followed by verb (e.g., "can't find", "couldn't see")
+		if contractions[prev] {
 			for _, v := range verbs {
 				if w == v {
 					return true

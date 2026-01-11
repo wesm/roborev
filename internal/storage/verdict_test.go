@@ -290,6 +290,21 @@ func TestParseVerdict(t *testing.T) {
 			want:   "P",
 		},
 		{
+			name:   "can't find issues with is pass",
+			output: "No issues found. I can't find issues with the code.",
+			want:   "P",
+		},
+		{
+			name:   "cannot find issues in is pass",
+			output: "No issues found. Cannot find issues in the module.",
+			want:   "P",
+		},
+		{
+			name:   "couldn't find issues with is pass",
+			output: "No issues found. I couldn't find issues with the implementation.",
+			want:   "P",
+		},
+		{
 			name:   "found colon with spaces normalized",
 			output: "No issues found. Found:   a bug.",
 			want:   "F",
