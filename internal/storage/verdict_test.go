@@ -266,6 +266,21 @@ func TestParseVerdict(t *testing.T) {
 			output: "No issues found. Found no bugs, found nothing wrong, but found a race condition.",
 			want:   "F",
 		},
+		{
+			name:   "found multiple issues",
+			output: "No issues found. I checked for bugs and found multiple issues.",
+			want:   "F",
+		},
+		{
+			name:   "found several bugs",
+			output: "No issues found. I looked for problems and found several bugs.",
+			want:   "F",
+		},
+		{
+			name:   "found many errors",
+			output: "No issues found. Checked for regressions and found many errors.",
+			want:   "F",
+		},
 
 		// Fail cases - findings present or ambiguous
 		{

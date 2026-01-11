@@ -127,13 +127,16 @@ func checkClauseForCaveat(clause string) bool {
 			}
 
 			// Check if followed by issue keywords (skip benign phrases like "found a way")
+			// Include quantifiers: multiple, several, many, a few, etc.
+			quantifiers := []string{"", "a ", "an ", "the ", "some ", "multiple ", "several ", "many ", "a few ", "few ", "two ", "three ", "various ", "numerous "}
 			for _, kw := range issueKeywords {
-				if strings.HasPrefix(afterFound, kw) ||
-					strings.HasPrefix(afterFound, "a "+kw) ||
-					strings.HasPrefix(afterFound, "an "+kw) ||
-					strings.HasPrefix(afterFound, "the "+kw) ||
-					strings.HasPrefix(afterFound, "some "+kw) {
-					hasFinding = true
+				for _, q := range quantifiers {
+					if strings.HasPrefix(afterFound, q+kw) {
+						hasFinding = true
+						break
+					}
+				}
+				if hasFinding {
 					break
 				}
 			}
