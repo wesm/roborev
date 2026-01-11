@@ -3072,3 +3072,57 @@ func TestTUIPageDownBlockedWhileLoadingJobs(t *testing.T) {
 		t.Error("No command should be returned when pagination is blocked")
 	}
 }
+
+func TestTUIHideAddressedEnableTriggersRefetch(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewQueue
+	m.hideAddressed = false
+
+	addressedFalse := false
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone, Addressed: &addressedFalse},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+
+	// Toggle hide addressed ON
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m2 := updated.(tuiModel)
+
+	// hideAddressed should be enabled
+	if !m2.hideAddressed {
+		t.Error("hideAddressed should be true after pressing 'h'")
+	}
+
+	// A command should be returned to fetch all jobs
+	if cmd == nil {
+		t.Error("Command should be returned to fetch all jobs when enabling hideAddressed")
+	}
+}
+
+func TestTUIHideAddressedDisableNoRefetch(t *testing.T) {
+	m := newTuiModel("http://localhost")
+	m.currentView = tuiViewQueue
+	m.hideAddressed = true // Already enabled
+
+	addressedFalse := false
+	m.jobs = []storage.ReviewJob{
+		{ID: 1, Status: storage.JobStatusDone, Addressed: &addressedFalse},
+	}
+	m.selectedIdx = 0
+	m.selectedJobID = 1
+
+	// Toggle hide addressed OFF
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m2 := updated.(tuiModel)
+
+	// hideAddressed should be disabled
+	if m2.hideAddressed {
+		t.Error("hideAddressed should be false after pressing 'h' to disable")
+	}
+
+	// No command should be returned when disabling (no need to refetch)
+	if cmd != nil {
+		t.Error("No command should be returned when disabling hideAddressed")
+	}
+}
