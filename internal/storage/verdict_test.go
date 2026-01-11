@@ -229,6 +229,36 @@ func TestParseVerdict(t *testing.T) {
 			output: "No issues found. The problem domain is well understood.",
 			want:   "P",
 		},
+		{
+			name:   "no issues remain is pass",
+			output: "No issues found. No issues remain.",
+			want:   "P",
+		},
+		{
+			name:   "no problems exist is pass",
+			output: "No issues found. No problems exist.",
+			want:   "P",
+		},
+		{
+			name:   "doesn't have issues is pass",
+			output: "No issues found. The code doesn't have issues.",
+			want:   "P",
+		},
+		{
+			name:   "doesn't have any problems is pass",
+			output: "No issues found. Code doesn't have any problems.",
+			want:   "P",
+		},
+		{
+			name:   "don't have vulnerabilities is pass",
+			output: "No issues found. We don't have vulnerabilities.",
+			want:   "P",
+		},
+		{
+			name:   "found colon with spaces normalized",
+			output: "No issues found. Found:   a bug.",
+			want:   "F",
+		},
 
 		// Fail cases - checked for with actual findings
 		{
@@ -359,6 +389,16 @@ func TestParseVerdict(t *testing.T) {
 		{
 			name:   "has issues",
 			output: "No issues found. The code has issues.",
+			want:   "F",
+		},
+		{
+			name:   "has vulnerabilities",
+			output: "No issues found. The system has vulnerabilities.",
+			want:   "F",
+		},
+		{
+			name:   "have vulnerabilities",
+			output: "No issues found. These modules have vulnerabilities.",
 			want:   "F",
 		},
 

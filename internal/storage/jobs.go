@@ -83,9 +83,14 @@ func hasCaveat(s string) bool {
 
 // checkClauseForCaveat checks a single clause for caveats
 func checkClauseForCaveat(clause string) bool {
-	// Normalize punctuation
+	// Normalize punctuation and collapse whitespace
 	normalized := strings.ReplaceAll(clause, ",", " ")
 	normalized = strings.ReplaceAll(normalized, ":", " ")
+	// Collapse multiple spaces to single space
+	for strings.Contains(normalized, "  ") {
+		normalized = strings.ReplaceAll(normalized, "  ", " ")
+	}
+	normalized = strings.TrimSpace(normalized)
 	lc := strings.ToLower(normalized)
 
 	// Benign phrases that contain issue keywords but aren't actual issues
@@ -169,10 +174,27 @@ func checkClauseForCaveat(clause string) bool {
 		"issues exist", "problems exist", "vulnerabilities exist",
 		"has issue", "has problem", "have issue", "have problem",
 		"has issues", "has problems", "have issues", "have problems",
+		"has vulnerabilit", "have vulnerabilit",
 	}
+	contextNegationPrefixes := []string{"no ", "any ", "no more ", "don't ", "doesn't "}
 	for _, pattern := range contextualPatterns {
-		if strings.Contains(lc, pattern) {
-			return true
+		if idx := strings.Index(lc, pattern); idx >= 0 {
+			// Check if preceded by negation within nearby text
+			start := idx - 25
+			if start < 0 {
+				start = 0
+			}
+			prefix := lc[start:idx]
+			isNegated := false
+			for _, neg := range contextNegationPrefixes {
+				if strings.Contains(prefix, neg) {
+					isNegated = true
+					break
+				}
+			}
+			if !isNegated {
+				return true
+			}
 		}
 	}
 	// Check "issues/problems with/in" but only if not negated
