@@ -1444,7 +1444,7 @@ func (db *DB) ReenqueueJobWithRequest(
 		    OR (status = 'canceled' AND worker_id IS NULL)
 		  )
 	`, enqueuedAt,
-		opts.RestorePlan, opts.Agent,
+		opts.RestorePlan || opts.Agent != "", opts.Agent,
 		nullString(opts.Model), nullString(opts.Provider),
 		opts.RestorePlan, opts.Reasoning,
 		opts.RestorePlan, opts.ReviewType,

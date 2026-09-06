@@ -2401,6 +2401,8 @@ components:
           format: uri
           readOnly: true
           type: string
+        agent:
+          type: string
         job_id:
           format: int64
           type: integer

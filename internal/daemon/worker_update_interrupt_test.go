@@ -272,9 +272,20 @@ func TestUpdateInterruptionPreemptsClassifierBackup(t *testing.T) {
 	cfg.ClassifyAgent = primaryName
 	cfg.ClassifyBackupAgent = backupName
 	tc.Pool.cfgGetter = NewStaticConfig(cfg)
-	job := tc.createAndClaimClassifyJob(
-		t, "update-classifier-backup", "subject", "+diff\n",
-	)
+	jobID, err := tc.DB.EnqueueAutoDesignJob(storage.EnqueueOpts{
+		RepoID:      tc.Repo.ID,
+		GitRef:      "update-classifier-backup",
+		Agent:       storage.AutoDesignAgentSentinel,
+		JobType:     storage.JobTypeClassify,
+		ReviewType:  "design",
+		DiffContent: "+diff\n",
+		Prompt:      "subject",
+	})
+	require.NoError(t, err)
+	job, err := tc.DB.ClaimJob(testWorkerID)
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	require.Equal(t, jobID, job.ID)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

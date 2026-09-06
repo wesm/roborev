@@ -31,6 +31,7 @@ const (
 	viewPatch               // Patch viewer for fix jobs
 	viewColumnOptions       // Column toggle modal
 	viewReleaseNotes        // Recent Roborev release notes
+	viewRerunAgent          // Agent picker for an ordinary job rerun
 )
 
 // queuePrefetchBuffer is the number of extra rows to fetch beyond what's visible,
@@ -326,6 +327,8 @@ type pauseResultMsg struct {
 }
 type rerunResultMsg struct {
 	jobID         int64
+	agent         string
+	oldAgent      string
 	oldState      storage.JobStatus
 	oldStartedAt  *time.Time
 	oldFinishedAt *time.Time

@@ -273,6 +273,9 @@ type model struct {
 	expandedPanels       map[uuid.UUID]bool                // panel_run_uuid -> expanded
 	panelMembers         map[uuid.UUID][]storage.ReviewJob // panel_run_uuid -> side-fetched members
 	currentView          viewKind
+	rerunAgentJobID      int64
+	rerunAgentOptions    []string
+	rerunAgentSelected   int
 	currentReview        *storage.Review
 	currentResponses     []storage.Response // Responses for current review (fetched with review)
 	currentBranch        string             // Cached branch name for current review (computed on load)
@@ -1389,6 +1392,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) viewContent() string {
+	if m.currentView == viewRerunAgent {
+		return m.renderRerunAgentView()
+	}
 	if m.currentView == viewReleaseNotes {
 		return m.renderReleaseNotesView()
 	}

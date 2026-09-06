@@ -5,6 +5,7 @@
 export interface RerunJobRequest {
   /** A URL to the JSON Schema for this object. */
   readonly $schema?: string;
+  agent?: string;
   job_id: number;
   request_id?: string;
 }

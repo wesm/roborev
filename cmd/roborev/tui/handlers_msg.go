@@ -1820,6 +1820,9 @@ func (m model) handleRerunResultMsg(
 			m.setJobFinishedAt(msg.jobID, msg.oldFinishedAt)
 			m.setJobError(msg.jobID, msg.oldError)
 			m.mutateJob(msg.jobID, func(job *storage.ReviewJob) {
+				if msg.agent != "" {
+					job.Agent = msg.oldAgent
+				}
 				job.Closed = msg.oldClosed
 				job.Verdict = msg.oldVerdict
 			})
@@ -1871,6 +1874,11 @@ func (m model) handleRerunResultMsg(
 			3*time.Second, m.currentView,
 		)
 		return m, nil
+	}
+	if msg.agent != "" {
+		m.mutateJob(msg.jobID, func(job *storage.ReviewJob) {
+			job.Agent = msg.agent
+		})
 	}
 	// Rerun confirmed: a rerun reuses the same job ID, so once the job
 	// finishes again `currentReview.JobID == job.ID` would keep matching

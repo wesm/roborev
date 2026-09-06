@@ -101,6 +101,24 @@ func TestRerunSynthesisRejectsNonTerminal(t *testing.T) {
 	assert.NotEmpty(t, runUUID)
 }
 
+func TestRerunPanelRejectsSelectedAgent(t *testing.T) {
+	server, db, _ := newTestServer(t)
+	runUUID, _, synth := enqueueServerPanelRun(t, db, 2)
+	markPanelMembersStatus(t, db, runUUID, storage.JobStatusDone)
+	markJobStatus(t, db, synth.ID, storage.JobStatusDone)
+
+	_, err := server.humaRerunJob(context.Background(), &RerunJobInput{
+		Body: RerunJobRequest{JobID: synth.ID, Agent: "test"},
+	})
+	require.ErrorContains(t, err, "panel synthesis jobs cannot change agents")
+
+	var count int
+	require.NoError(t, db.QueryRow(
+		"SELECT COUNT(DISTINCT panel_run_uuid) FROM review_jobs WHERE panel_run_uuid != ''",
+	).Scan(&count))
+	assert.Equal(t, 1, count)
+}
+
 func TestRerunPanelRejectsMemberStillStopping(t *testing.T) {
 	server, db, _ := newTestServer(t)
 	runUUID, members, synth := enqueueServerPanelRun(t, db, 2)

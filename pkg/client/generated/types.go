@@ -2025,6 +2025,7 @@ func (r RerunJobOutputBody) Validate() error {
 type RerunJobRequest struct {
 	// Schema A URL to the JSON Schema for this object.
 	Schema    *string    `json:"$schema,omitempty"`
+	Agent     *string    `json:"agent,omitempty"`
 	JobID     int64      `json:"job_id"`
 	RequestID *uuid.UUID `json:"request_id,omitempty"`
 }

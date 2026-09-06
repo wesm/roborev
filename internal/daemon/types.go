@@ -247,6 +247,7 @@ type CancelJobRequest struct {
 type RerunJobRequest struct {
 	JobID     int64      `json:"job_id"`
 	RequestID *uuid.UUID `json:"request_id,omitempty" format:"uuid"`
+	Agent     string     `json:"agent,omitempty"`
 }
 
 // AddCommentRequest is the JSON body for POST /api/comment.

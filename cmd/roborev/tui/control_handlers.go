@@ -643,39 +643,8 @@ func (m model) handleCtrlRerunJob(
 		}, nil
 	}
 
-	snap := rerunSnapshot{
-		jobID:         job.ID,
-		oldStatus:     job.Status,
-		oldStartedAt:  job.StartedAt,
-		oldFinishedAt: job.FinishedAt,
-		oldError:      job.Error,
-		oldClosed:     job.Closed,
-		oldVerdict:    job.Verdict,
-		// Same as the keyboard path: a synthesis parent's rerun spawns a
-		// new panel run with new job IDs, not a new attempt of this job.
-		spawnsNewRun: job.IsSynthesisJob(),
-	}
-	// Same gate as the keyboard path: this optimistic
-	// re-queue is only consistent with what the daemon will do when the
-	// daemon really re-runs THIS row. A synthesis parent's rerun enqueues a
-	// separate run and leaves this row -- and its review -- exactly as they
-	// are, so the mutation would be wrong from the instant it was made.
-	if !snap.spawnsNewRun {
-		job.Status = storage.JobStatusQueued
-		job.StartedAt = nil
-		job.FinishedAt = nil
-		job.Error = ""
-		// Clear review-derived fields so the rerun job is visible
-		// under hideClosed and doesn't expose stale verdict data.
-		// For an ordinary rerun the daemon deletes the review row, so this
-		// keeps the local optimistic state consistent until the next fetch.
-		job.Closed = nil
-		job.Verdict = nil
-	} else {
-		m.markPanelRerunInFlight(job.ID)
-	}
-
-	return m, controlResponse{OK: true}, m.rerunJob(snap)
+	cmd := m.startRerun(job, "")
+	return m, controlResponse{OK: true}, cmd
 }
 
 func (m model) handleCtrlQuit() (model, controlResponse, tea.Cmd) {

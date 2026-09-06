@@ -53,7 +53,8 @@ branch.
 | `c` | Add comment |
 | `y` | Copy review to clipboard |
 | `x` | Cancel running/queued job |
-| `r` | Rerun completed/failed/canceled job |
+| `r` | Rerun completed/failed/canceled job with its stored agent |
+| `R` | Choose another available agent, then rerun an ordinary terminal job |
 | `F` | Launch fix job (requires [`advanced.tasks_enabled`](/docs/advanced/background-tasks/)) |
 | `T` | Switch to Tasks view (requires [`advanced.tasks_enabled`](/docs/advanced/background-tasks/)) |
 | `o` | Column options (reorder, toggle visibility) |
@@ -70,10 +71,18 @@ branch.
 | `Ctrl-D` | Quit |
 | `q` | Quit |
 
+Choosing another agent with `R` uses its configured model and provider defaults
+instead of the original request's explicit overrides. The job keeps the original
+request for reference. The rerun reuses the job and replaces its previous
+review.
+
 Panel reviews appear as one synthesis parent row by default. The parent row
 shows live progress while member reviewers run and a compact member summary
 after completion. Expand the row to inspect individual member jobs. Close,
 cancel, rerun, or fix the panel from the parent row, not from a member row.
+Panel reruns keep their configured members, so use `r` on the synthesis parent.
+The alternate-agent picker does not open for panel rows or experiment-attributed
+jobs.
 
 When a newer Roborev version is available, the queue banner points to the
 release-notes viewer. Press `u` at any time to open it. The viewer renders the
@@ -288,7 +297,7 @@ Press `Enter` on a job to view its review.
 | `c` | Add comment |
 | `y` | Copy review to clipboard |
 | `x` | Cancel running/queued job |
-| `r` | Rerun completed/failed/canceled job |
+| `r` | Rerun completed/failed/canceled job with its stored agent |
 | `F` | Open inline fix panel (requires [`advanced.tasks_enabled`](/docs/advanced/background-tasks/)) |
 | `l` | View job log |
 | `p` | Switch between review/prompt |
@@ -486,7 +495,7 @@ read this file to discover running TUI instances.
 | `set-view` | Switch between `queue` and `tasks` views |
 | `close-review` | Toggle closed state for a job |
 | `cancel-job` | Cancel a running or queued job |
-| `rerun-job` | Rerun a completed, failed, or canceled job |
+| `rerun-job` | Rerun a completed, failed, or canceled job with its stored agent |
 | `quit` | Terminate the TUI (works even with `--no-quit`) |
 
 ### Protocol
@@ -498,6 +507,9 @@ Send a request as a single JSON line:
 {"command": "set-filter", "params": {"repo": "myrepo", "branch": "main"}}
 {"command": "close-review", "params": {"job_id": 42}}
 ```
+
+The control socket's `rerun-job` command does not accept an agent override. It
+uses the same default rerun path as lowercase `r`.
 
 Responses include an `ok` field, optional `error`, and optional `data`:
 

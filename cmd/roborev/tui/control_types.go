@@ -106,6 +106,8 @@ func (v viewKind) String() string {
 		return "column-options"
 	case viewReleaseNotes:
 		return "release-notes"
+	case viewRerunAgent:
+		return "rerun-agent"
 	default:
 		return "unknown"
 	}

@@ -36,6 +36,8 @@ func (m model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleColumnOptionsInput(msg)
 	case viewReleaseNotes:
 		return m.handleReleaseNotesKey(msg)
+	case viewRerunAgent:
+		return m.handleRerunAgentPickerKey(msg)
 	}
 
 	// Review-scoped actions must not fire against a review the detail pane
@@ -222,6 +224,8 @@ func (m model) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCancelKey()
 	case "r":
 		return m.handleRerunKey()
+	case "R":
+		return m.handleRerunAgentKey()
 	case "l", "t":
 		return m.handleLogKey2()
 	case "f":

@@ -32,6 +32,7 @@ func TestViewKindString(t *testing.T) {
 		{viewLog, "log"},
 		{viewFilter, "filter"},
 		{viewPatch, "patch"},
+		{viewRerunAgent, "rerun-agent"},
 		{viewKind(999), "unknown"},
 	}
 	for _, tt := range tests {

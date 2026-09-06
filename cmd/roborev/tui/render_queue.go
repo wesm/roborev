@@ -110,6 +110,7 @@ func (m model) queueHelpRows() [][]helpItem {
 	row1 := []helpItem{
 		{"x", "cancel"},
 		{"r", "rerun"},
+		{"R", "rerun new agent"},
 		{"l", "log"},
 		{"p", "prompt"},
 		{"c", "comment"},
@@ -146,6 +147,35 @@ func (m model) queueHelpRows() [][]helpItem {
 		row2 = append(row2, helpItem{"q", "quit"})
 	}
 	return [][]helpItem{row1, row2}
+}
+
+func (m model) renderRerunAgentView() string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "%s\x1b[K\n\x1b[K\n",
+		titleStyle.Render(fmt.Sprintf("Rerun job #%d with agent", m.rerunAgentJobID)))
+	visibleRows := max(m.height-5, 0)
+	start := 0
+	if m.rerunAgentSelected >= visibleRows && visibleRows > 0 {
+		start = m.rerunAgentSelected - visibleRows + 1
+	}
+	end := min(start+visibleRows, len(m.rerunAgentOptions))
+	for i := start; i < end; i++ {
+		line := "  " + sanitizeForDisplay(m.rerunAgentOptions[i])
+		if i == m.rerunAgentSelected {
+			line = selectedStyle.Render("> " + sanitizeForDisplay(m.rerunAgentOptions[i]))
+		}
+		b.WriteString(line)
+		b.WriteString("\x1b[K\n")
+	}
+	for i := end - start; i < visibleRows; i++ {
+		b.WriteString("\x1b[K\n")
+	}
+	b.WriteString(renderHelpTable([][]helpItem{{
+		{"Up/Down", "navigate"}, {"Enter", "rerun"}, {"Esc", "cancel"},
+	}}, m.width))
+	b.WriteString("\x1b[K\x1b[J")
+	return b.String()
 }
 
 // selectedRowHasChildren reports whether the currently selected visible row is

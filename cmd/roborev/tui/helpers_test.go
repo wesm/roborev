@@ -559,6 +559,19 @@ func TestQueueHelpRowsTasksWorkflowToggle(t *testing.T) {
 	assert.False(t, !foundF || !foundT)
 }
 
+func TestQueueHelpRowsDistinguishesRerunActions(t *testing.T) {
+	rows := newModel(testEndpoint, withExternalIODisabled()).queueHelpRows()
+	labels := make(map[string]string)
+	for _, row := range rows {
+		for _, item := range row {
+			labels[item.key] = item.desc
+		}
+	}
+
+	assert.Equal(t, "rerun", labels["r"])
+	assert.Equal(t, "rerun new agent", labels["R"])
+}
+
 func TestHelpLinesShowDisabledTasksShortcuts(t *testing.T) {
 	disabled := strings.Join(helpLines(false, false), "\n")
 	assert.Contains(t, stripTestANSI(disabled), "Trigger fix for selected review (disabled)")

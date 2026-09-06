@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -248,6 +249,62 @@ func TestProcessClassifyJob_WritesStandardLogAndCommandLine(t *testing.T) {
 	event, ok := waitForEvent(t, events, time.Second)
 	require.True(t, ok)
 	assert.Equal(t, "fake-schema", event.Agent)
+}
+
+func TestProcessClassifyJobUsesStoredAgent(t *testing.T) {
+	setupTestEnv(t)
+	tc := newWorkerTestContext(t, 1)
+
+	var configuredCalls, selectedCalls int
+	configured := &fakeSchemaAgent{
+		name: "configured-classifier",
+		classifyFn: func(context.Context) (json.RawMessage, error) {
+			configuredCalls++
+			return []byte(`{"design_review": false, "reason": "configured"}`), nil
+		},
+	}
+	selected := &fakeSchemaAgent{
+		name: "selected-classifier",
+		classifyFn: func(context.Context) (json.RawMessage, error) {
+			selectedCalls++
+			return []byte(`{"design_review": false, "reason": "selected"}`), nil
+		},
+	}
+	agent.Register(configured)
+	agent.Register(selected)
+	t.Cleanup(func() {
+		agent.Unregister(configured.Name())
+		agent.Unregister(selected.Name())
+	})
+
+	cfg := config.DefaultConfig()
+	cfg.ClassifyAgent = configured.Name()
+	tc.Pool.cfgGetter = NewStaticConfig(cfg)
+
+	_, err := tc.DB.GetOrCreateCommit(tc.Repo.ID, "stored-agent", "Author", "s", time.Now())
+	require.NoError(t, err)
+	jobID, err := tc.DB.EnqueueAutoDesignJob(storage.EnqueueOpts{
+		RepoID:     tc.Repo.ID,
+		GitRef:     "stored-agent",
+		Agent:      selected.Name(),
+		Model:      "selected-model",
+		JobType:    storage.JobTypeClassify,
+		ReviewType: "design",
+	})
+	require.NoError(t, err)
+	claimed, err := tc.DB.ClaimJob("worker-stored-agent")
+	require.NoError(t, err)
+	require.Equal(t, jobID, claimed.ID)
+
+	tc.Pool.processClassifyJob(context.Background(), "worker-stored-agent", claimed)
+
+	assert.Equal(t, 0, configuredCalls)
+	assert.Equal(t, 1, selectedCalls)
+	got, err := tc.DB.GetJobByID(jobID)
+	require.NoError(t, err)
+	assert.Equal(t, selected.Name(), got.Agent)
+	assert.Equal(t, "selected-model", got.Model)
+	assert.Equal(t, "selected", got.SkipReason)
 }
 
 // waitForEvent reads one event from ch within timeout.

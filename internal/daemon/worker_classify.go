@@ -118,14 +118,23 @@ func (wp *WorkerPool) processClassifyJob(ctx context.Context, workerID string, j
 		ChangedFiles: changedFilesForJob(job),
 	}
 
-	primary, err := config.ResolveClassifyAgent("", job.RepoPath, cfg)
-	if err != nil {
-		log.Printf("[%s] classifier config error for job %d: %v", workerID, job.ID, err)
-		closeJobLog()
-		wp.completeClassifyAsSkipContext(ctx, workerID, job, "classifier unavailable", err.Error())
-		return
+	storedAgent := strings.TrimSpace(job.Agent)
+	jobHasExplicitAgent := storedAgent != "" &&
+		storedAgent != storage.AutoDesignAgentSentinel
+	var primary string
+	var err error
+	if jobHasExplicitAgent {
+		primary = storedAgent
+	} else {
+		primary, err = config.ResolveClassifyAgent("", job.RepoPath, cfg)
+		if err != nil {
+			log.Printf("[%s] classifier config error for job %d: %v", workerID, job.ID, err)
+			closeJobLog()
+			wp.completeClassifyAsSkipContext(ctx, workerID, job, "classifier unavailable", err.Error())
+			return
+		}
 	}
-	defaultedPrimary := classifyAgentDefaulted(job.RepoPath, cfg)
+	defaultedPrimary := !jobHasExplicitAgent && classifyAgentDefaulted(job.RepoPath, cfg)
 	backup, backupErr := config.ResolveBackupClassifyAgent(job.RepoPath, cfg)
 	if backupErr != nil {
 		log.Printf("[%s] classifier backup agent invalid (%v); ignoring", workerID, backupErr)
@@ -181,6 +190,9 @@ func (wp *WorkerPool) processClassifyJob(ctx context.Context, workerID string, j
 	}
 
 	primaryModel := config.ResolveClassifyModel("", job.RepoPath, cfg)
+	if jobHasExplicitAgent {
+		primaryModel = strings.TrimSpace(job.Model)
+	}
 	yes, reason, selected, err := tryAgent(primary, primaryModel)
 	if err != nil && wp.handleUpdateInterruption(ctx, workerID, job) {
 		closeJobLog()

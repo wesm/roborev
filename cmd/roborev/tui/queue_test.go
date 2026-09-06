@@ -3329,18 +3329,22 @@ func TestExpandHintOnlyWhenParentSelected(t *testing.T) {
 // TestQueueHelpLinesAccountForExpandHint proves the help-height reservation
 // (queueHelpLines) counts the same rows renderQueueView draws: the base rows
 // when a non-parent is selected, and the rows plus the "space — expand" hint
-// when a panel parent is selected. width=110 is chosen because the hint reflows
-// the help onto one more line there (base 2 lines vs hinted 3) — the case the
-// off-by-one bug bit; width=120 (the seeded default) is the no-reflow case where
-// the two counts coincide.
+// when a panel parent is selected. Cover widths with and without an extra
+// reflow line so adding a shortcut does not invalidate the test's fixture.
 func TestQueueHelpLinesAccountForExpandHint(t *testing.T) {
-	for _, w := range []int{110, 120} {
+	var extraLineWidths, sameHeightWidths int
+	for w := 80; w <= 160; w++ {
 		t.Run(fmt.Sprintf("width=%d", w), func(t *testing.T) {
 			m := seededPanelModel(t) // jobs = [20 standalone, 10 parent]
 			m.width = w
 
 			base := len(reflowHelpRows(m.queueHelpRows(), w))
 			hinted := len(reflowHelpRows(withExpandHint(m.queueHelpRows()), w))
+			if hinted > base {
+				extraLineWidths++
+			} else if hinted == base {
+				sameHeightWidths++
+			}
 
 			// Non-parent selected: reservation must equal the base help height.
 			m.selectedJobID, m.selectedIdx = 20, 0
@@ -3355,13 +3359,8 @@ func TestQueueHelpLinesAccountForExpandHint(t *testing.T) {
 		})
 	}
 
-	// At width=110 the hint genuinely costs an extra reflowed line, so the two
-	// reservations differ — this is the regression the fix addresses.
-	m := seededPanelModel(t)
-	m.width = 110
-	assert.Less(t, len(reflowHelpRows(m.queueHelpRows(), 110)),
-		len(reflowHelpRows(withExpandHint(m.queueHelpRows()), 110)),
-		"width=110 must be a width where the expand hint adds a reflow line")
+	assert.Positive(t, extraLineWidths, "exercise widths where the expand hint adds a line")
+	assert.Positive(t, sameHeightWidths, "exercise widths where the expand hint fits")
 }
 
 func TestEnterOnInProgressParentFlashesProgress(t *testing.T) {
