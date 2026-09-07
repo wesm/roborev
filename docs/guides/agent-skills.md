@@ -128,11 +128,18 @@ Review all commits since the current branch diverged from main:
 ```
 /roborev-review-branch
 /roborev-review-branch --base develop
+/roborev-review-branch --base upstream/main
 /roborev-review-branch --type security
 ```
 
 The skill enqueues a branch review and waits for results so the agent can
 present them inline.
+
+When `--base` names a configured remote and branch, such as `upstream/main`, the
+skill fetches that branch if the ref is missing locally, then validates it again
+before requesting the review. Refs that already resolve locally do not trigger a
+fetch. If the remote is not configured, the branch does not exist, or fetching
+fails, the skill reports the Git error and stops without requesting a review.
 
 ### Design review
 

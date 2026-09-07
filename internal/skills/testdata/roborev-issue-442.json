@@ -1,0 +1,8 @@
+{
+  "body": "The `review-branch` skill's input validation (step 1) runs `git rev-parse --verify -- <branch>` to check that the `--base` ref is valid before proceeding. This fails when the ref is a remote tracking branch that hasn't been fetched locally yet.\n\n```\n$ git rev-parse --verify -- upstream/main\nfatal: Needed a single revision\n```",
+  "number": 442,
+  "reproduction": {
+    "base_ref": "upstream/main"
+  },
+  "url": "https://github.com/kenn-io/roborev/issues/442"
+}

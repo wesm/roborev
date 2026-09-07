@@ -50,7 +50,9 @@ When the user invokes `/roborev-review-branch [--base <branch>] [--type security
 
 If a base branch is provided, use the base-branch command snippet below; it stores and validates the ref before invoking `roborev review`.
 
-If validation fails, inform the user the ref is invalid. Do not proceed.
+The snippet recovers one case on its own: when the ref names a configured remote followed by a branch (for example `upstream/main`) and that remote-tracking ref has not been fetched into this worktree yet, it fetches that one branch from that one remote and re-validates. It searches configured remote names from the longest slash-delimited prefix, so remote names that contain slashes are supported. Every other unresolvable ref is still rejected, and no fetch is attempted for a ref with no configured remote prefix.
+
+If validation fails, inform the user the ref is invalid and report the git error. Do not proceed.
 
 ### 2. Build the command
 
@@ -68,7 +70,31 @@ If a base branch is specified, run:
 read -r branch <<'ROBOREV_REF'
 <branch>
 ROBOREV_REF
-git rev-parse --verify -- "$branch" || exit 1
+if ! git rev-parse --verify --quiet --end-of-options "$branch" >/dev/null; then
+  remote=
+  remote_branch="${branch##*/}"
+  remote_candidate="${branch%/*}"
+  while :; do
+    if [ "$remote_candidate" != "$branch" ] && git config --get "remote.$remote_candidate.url" >/dev/null; then
+      remote="$remote_candidate"
+      break
+    fi
+    case "$remote_candidate" in
+      */*)
+        remote_branch="${remote_candidate##*/}/$remote_branch"
+        remote_candidate="${remote_candidate%/*}"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  if [ -n "$remote" ]; then
+    git check-ref-format --branch "$remote_branch" >/dev/null || exit 1
+    git fetch --quiet --refmap= -- "$remote" "refs/heads/$remote_branch:refs/remotes/$remote/$remote_branch" || exit 1
+  fi
+  git rev-parse --verify --end-of-options "$branch" >/dev/null || exit 1
+fi
 roborev review --branch --wait --base "$branch" [--type <type>] [--panel <name>|none]
 ```
 
@@ -94,7 +120,31 @@ If a base branch is specified, run:
 read -r branch <<'ROBOREV_REF'
 <branch>
 ROBOREV_REF
-git rev-parse --verify -- "$branch" || exit 1
+if ! git rev-parse --verify --quiet --end-of-options "$branch" >/dev/null; then
+  remote=
+  remote_branch="${branch##*/}"
+  remote_candidate="${branch%/*}"
+  while :; do
+    if [ "$remote_candidate" != "$branch" ] && git config --get "remote.$remote_candidate.url" >/dev/null; then
+      remote="$remote_candidate"
+      break
+    fi
+    case "$remote_candidate" in
+      */*)
+        remote_branch="${remote_candidate##*/}/$remote_branch"
+        remote_candidate="${remote_candidate%/*}"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  if [ -n "$remote" ]; then
+    git check-ref-format --branch "$remote_branch" >/dev/null || exit 1
+    git fetch --quiet --refmap= -- "$remote" "refs/heads/$remote_branch:refs/remotes/$remote/$remote_branch" || exit 1
+  fi
+  git rev-parse --verify --end-of-options "$branch" >/dev/null || exit 1
+fi
 roborev review --branch --wait --base "$branch" [--type <type>] [--panel <name>|none]
 ```
 

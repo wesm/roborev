@@ -1,10 +1,12 @@
 package skills
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -16,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/roborev/internal/autofix"
+	"go.kenn.io/roborev/internal/testutil"
 )
 
 type agentCase struct {
@@ -1102,6 +1105,265 @@ func TestFixSkillsRecognizeRuntimeAutofixGuidelines(t *testing.T) {
 			}
 			require.NotEmpty(t, content)
 			assert.Contains(t, content, autofix.GuidelinesHeading)
+		})
+	}
+}
+
+const wantReviewBranchRefSnippet = `read -r branch <<'ROBOREV_REF'
+<branch>
+ROBOREV_REF
+if ! git rev-parse --verify --quiet --end-of-options "$branch" >/dev/null; then
+  remote=
+  remote_branch="${branch##*/}"
+  remote_candidate="${branch%/*}"
+  while :; do
+    if [ "$remote_candidate" != "$branch" ] && git config --get "remote.$remote_candidate.url" >/dev/null; then
+      remote="$remote_candidate"
+      break
+    fi
+    case "$remote_candidate" in
+      */*)
+        remote_branch="${remote_candidate##*/}/$remote_branch"
+        remote_candidate="${remote_candidate%/*}"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  if [ -n "$remote" ]; then
+    git check-ref-format --branch "$remote_branch" >/dev/null || exit 1
+    git fetch --quiet --refmap= -- "$remote" "refs/heads/$remote_branch:refs/remotes/$remote/$remote_branch" || exit 1
+  fi
+  git rev-parse --verify --end-of-options "$branch" >/dev/null || exit 1
+fi
+roborev review --branch --wait --base "$branch" [--type <type>] [--panel <name>|none]`
+
+const wantReviewBranchFetchCommand = `git fetch --quiet --refmap= -- "$remote" "refs/heads/$remote_branch:refs/remotes/$remote/$remote_branch" || exit 1`
+
+func reviewBranchRefSnippets(t *testing.T, agent Agent) []string {
+	t.Helper()
+	spec, ok := lookupAgent(agent)
+	require.True(t, ok)
+	skills, err := embeddedSkillsForAgent(spec)
+	require.NoError(t, err)
+
+	var snippets []string
+	for _, skill := range skills {
+		if skill.DirName != "roborev-review-branch" {
+			continue
+		}
+		content := strings.ReplaceAll(string(skill.Content), "\r\n", "\n")
+		for _, block := range strings.Split(content, "```bash\n")[1:] {
+			body, _, ok := strings.Cut(block, "\n```")
+			if ok && strings.Contains(body, "ROBOREV_REF") {
+				snippets = append(snippets, body)
+			}
+		}
+	}
+	return snippets
+}
+
+type reviewBranchIssueArtifact struct {
+	Body         string `json:"body"`
+	Number       int    `json:"number"`
+	URL          string `json:"url"`
+	Reproduction struct {
+		BaseRef string `json:"base_ref"`
+	} `json:"reproduction"`
+	ReproductionRef string `json:"-"`
+}
+
+//go:embed testdata/roborev-issue-442.json
+var reviewBranchIssueFixture []byte
+
+func loadReviewBranchIssueArtifact(t *testing.T) reviewBranchIssueArtifact {
+	t.Helper()
+	var artifact reviewBranchIssueArtifact
+	require.NoError(t, json.Unmarshal(reviewBranchIssueFixture, &artifact))
+	require.Equal(t, 442, artifact.Number)
+	require.Equal(t, "https://github.com/kenn-io/roborev/issues/442", artifact.URL)
+
+	refRE := regexp.MustCompile(`git rev-parse --verify -- ([A-Za-z0-9._/-]+)`)
+	var reproductionRef string
+	for _, match := range refRE.FindAllStringSubmatch(artifact.Body, -1) {
+		if len(match) == 2 && match[1] == "upstream/main" {
+			reproductionRef = match[1]
+		}
+	}
+	require.Equal(t, "upstream/main", reproductionRef, "issue fixture must preserve the valid upstream/main reproduction")
+	require.Equal(t, reproductionRef, artifact.Reproduction.BaseRef, "issue fixture base must bind to its declared reproduction")
+	artifact.ReproductionRef = artifact.Reproduction.BaseRef
+	return artifact
+}
+
+func TestReviewBranchSkillsShareOneRefValidationSnippet(t *testing.T) {
+	wantCounts := map[Agent]int{
+		AgentClaude: 2,
+		AgentCodex:  1,
+		AgentDroid:  1,
+		AgentGrok:   1,
+	}
+
+	for _, agent := range []Agent{AgentClaude, AgentCodex, AgentDroid, AgentGrok} {
+		t.Run(string(agent), func(t *testing.T) {
+			snippets := reviewBranchRefSnippets(t, agent)
+			require.Len(t, snippets, wantCounts[agent])
+			for _, snippet := range snippets {
+				assert.Equal(t, wantReviewBranchRefSnippet, snippet)
+				assert.Contains(t, snippet, wantReviewBranchFetchCommand)
+			}
+
+			spec, ok := lookupAgent(agent)
+			require.True(t, ok)
+			skills, err := embeddedSkillsForAgent(spec)
+			require.NoError(t, err)
+			for _, skill := range skills {
+				if skill.DirName == "roborev-review-branch" {
+					assert.NotContains(t, string(skill.Content), "--verify -- ")
+				}
+			}
+		})
+	}
+}
+
+func TestReviewBranchSkillRefValidationBehavior(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skipf("bash unavailable: %v", err)
+	}
+
+	issueArtifact := loadReviewBranchIssueArtifact(t)
+	upstreamRepo := testutil.InitTestRepo(t)
+	upstreamRepo.CheckoutNewBranch("feature/x")
+	upstreamRepo.CommitFile("nested-feature.txt", "nested feature", "nested feature commit")
+	upstreamMainSHA := upstreamRepo.RevParse("main")
+	upstreamFeatureSHA := upstreamRepo.HeadSHA()
+
+	snippets := reviewBranchRefSnippets(t, AgentCodex)
+	require.Len(t, snippets, 1)
+
+	pwnPath := filepath.Join(t.TempDir(), "pwn")
+	cases := []struct {
+		name                      string
+		ref                       string
+		prepareFetchedRef         bool
+		maliciousFetchDestination bool
+		wantSuccess               bool
+		wantRun                   bool
+		wantFetches               int
+		wantRemoteRefs            map[string]string
+	}{
+		{name: "upstream_main", ref: issueArtifact.ReproductionRef, wantFetches: 1, wantSuccess: true, wantRun: true, wantRemoteRefs: map[string]string{"refs/remotes/upstream/main": upstreamMainSHA}},
+		{name: "upstream_feature_x", ref: "upstream/feature/x", wantFetches: 1, wantSuccess: true, wantRun: true, wantRemoteRefs: map[string]string{"refs/remotes/upstream/feature/x": upstreamFeatureSHA}},
+		{name: "slash_remote_main", ref: "team/upstream/main", wantFetches: 1, wantSuccess: true, wantRun: true, wantRemoteRefs: map[string]string{"refs/remotes/team/upstream/main": upstreamMainSHA}},
+		{name: "origin_main_fetched", ref: "origin/main", prepareFetchedRef: true, wantSuccess: true, wantRun: true, wantRemoteRefs: map[string]string{"refs/remotes/origin/main": upstreamMainSHA}},
+		{name: "malicious_remote_fetch_destination", ref: "origin/main", maliciousFetchDestination: true, wantFetches: 1, wantSuccess: true, wantRun: true, wantRemoteRefs: map[string]string{"refs/remotes/origin/main": upstreamMainSHA}},
+		{name: "feat", ref: "feat", wantSuccess: true, wantRun: true},
+		{name: "main", ref: "main", wantSuccess: true, wantRun: true},
+		{name: "develop", ref: "develop"},
+		{name: "upstream_ghost", ref: "upstream/ghost", wantFetches: 1},
+		{name: "release_1_2", ref: "release/1.2"},
+		{name: "nosuchremote_main", ref: "nosuchremote/main"},
+		{name: "empty", ref: ""},
+		{name: "slash_main", ref: "/main"},
+		{name: "exec_id", ref: "--exec=id"},
+		{name: "upload_pack", ref: "origin/--upload-pack=touch " + pwnPath},
+		{name: "substitution_shape", ref: "origin/$(touch " + pwnPath + ")"},
+		{name: "malformed_destination", ref: "origin/main:foo"},
+		{name: "malformed_heads_destination", ref: "origin/main:refs/heads/pwn"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			work := testutil.InitTestRepo(t)
+			work.CheckoutNewBranch("feat")
+			work.CommitFile("feature.txt", "feature", "feature commit")
+			work.AddRemote("upstream", filepath.ToSlash(upstreamRepo.Path()))
+			work.AddRemote("origin", filepath.ToSlash(upstreamRepo.Path()))
+			work.AddRemote("team/upstream", filepath.ToSlash(upstreamRepo.Path()))
+			if tc.maliciousFetchDestination {
+				work.RunGit("config", "remote.origin.fetch", "+refs/heads/main:refs/heads/pwn")
+				work.RunGit("update-ref", "refs/heads/pwn", work.HeadSHA())
+			}
+
+			for _, ref := range []string{
+				"refs/remotes/upstream/main",
+				"refs/remotes/upstream/feature/x",
+				"refs/remotes/team/upstream/main",
+				"refs/remotes/origin/main",
+			} {
+				precondition := exec.Command("git", "rev-parse", "--verify", "--end-of-options", ref)
+				precondition.Dir = work.Path()
+				require.Error(t, precondition.Run(), "%s must start unfetched", ref)
+			}
+			if tc.prepareFetchedRef {
+				work.RunGit("fetch", "--quiet", "--", "origin", "main")
+			}
+
+			localHeadRefs := func() string {
+				cmd := exec.Command("git", "for-each-ref", "--format=%(refname)", "refs/heads")
+				cmd.Dir = work.Path()
+				output, err := cmd.Output()
+				require.NoError(t, err)
+				return string(output)
+			}
+			beforeHeadRefs := localHeadRefs()
+			var beforePwnSHA string
+			if tc.maliciousFetchDestination {
+				beforePwnSHA = work.RevParse("refs/heads/pwn")
+			}
+
+			script := "fetch_log=.fetch-invocations\n" +
+				"git() {\n" +
+				"  if [ \"$1\" = fetch ]; then\n" +
+				"    printf '%s\\n' \"$*\" >> \"$fetch_log\"\n" +
+				"  fi\n" +
+				"  command git \"$@\"\n" +
+				"}\n" +
+				strings.Replace(snippets[0], "<branch>", tc.ref, 1)
+			script = strings.Replace(script, "roborev review --branch --wait --base \"$branch\" [--type <type>] [--panel <name>|none]", "echo ROBOREV_WOULD_RUN", 1)
+			scriptPath := filepath.Join(t.TempDir(), "review-branch.sh")
+			require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o600))
+
+			var stdout, stderr strings.Builder
+			cmd := exec.Command(bash, scriptPath)
+			cmd.Dir = work.Path()
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			runErr := cmd.Run()
+			assert.Equal(t, tc.wantSuccess, runErr == nil, "stderr: %s", stderr.String())
+			assert.Equal(t, tc.wantRun, strings.Contains(stdout.String(), "ROBOREV_WOULD_RUN"), "stdout: %s", stdout.String())
+
+			for _, ref := range []string{
+				"refs/remotes/upstream/main",
+				"refs/remotes/upstream/feature/x",
+				"refs/remotes/team/upstream/main",
+				"refs/remotes/origin/main",
+			} {
+				remoteRef := exec.Command("git", "rev-parse", "--verify", "--end-of-options", ref)
+				remoteRef.Dir = work.Path()
+				output, err := remoteRef.Output()
+				wantSHA, wantRef := tc.wantRemoteRefs[ref]
+				if wantRef {
+					require.NoError(t, err, "%s", ref)
+					assert.Equal(t, wantSHA, strings.TrimSpace(string(output)), "%s object ID", ref)
+				} else {
+					require.Error(t, err, "%s", ref)
+				}
+			}
+			assert.Equal(t, beforeHeadRefs, localHeadRefs(), "snippet must not mutate refs/heads")
+			if tc.maliciousFetchDestination {
+				assert.Equal(t, beforePwnSHA, work.RevParse("refs/heads/pwn"), "malicious fetch mapping must not change refs/heads/pwn")
+			}
+			fetchLog, err := os.ReadFile(filepath.Join(work.Path(), ".fetch-invocations"))
+			if err != nil {
+				require.ErrorIs(t, err, os.ErrNotExist)
+			}
+			gotFetches := strings.Count(string(fetchLog), "\n")
+			assert.Equal(t, tc.wantFetches, gotFetches, "fetch invocation count")
+			_, err = os.Stat(pwnPath)
+			assert.Error(t, err)
 		})
 	}
 }
