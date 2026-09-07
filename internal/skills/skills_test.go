@@ -1298,7 +1298,7 @@ func TestReviewBranchSkillRefValidationBehavior(t *testing.T) {
 				require.Error(t, precondition.Run(), "%s must start unfetched", ref)
 			}
 			if tc.prepareFetchedRef {
-				work.RunGit("fetch", "--quiet", "--end-of-options", "origin", "main")
+				work.RunGit("fetch", "--quiet", "--", "origin", "main")
 			}
 
 			localHeadRefs := func() string {
